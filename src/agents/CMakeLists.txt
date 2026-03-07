@@ -1,0 +1,12 @@
+add_library(Agents
+    AgentBase.cpp
+    AgentBase.hpp
+    ModelingAgent.cpp
+    ModelingAgent.hpp
+    OSAgent.cpp
+    OSAgent.hpp
+    VGEAgent.cpp
+    VGEAgent.hpp
+    DevelopmentAgent.cpp
+    DevelopmentAgent.hpp
+)

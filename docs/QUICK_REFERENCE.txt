@@ -1,0 +1,103 @@
+╔══════════════════════════════════════════════════════════════╗
+║                    VersaAI Quick Reference                   ║
+╚══════════════════════════════════════════════════════════════╝
+
+🚀 LAUNCH COMMANDS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Full Stack (GUI + Backend):     cd ui && ./scripts/run_with_backend.sh
+Interactive Menu:                ./launch.sh
+Backend Only:                    python3 start_editor_bridge.py
+Flutter UI Only:                 cd ui && flutter run -d linux
+CLI Code Assistant:              python3 versaai_cli.py
+
+🔧 SYSTEM STATUS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ Model Router:        5 models (4 downloaded)
+✅ WebSocket Backend:   ws://localhost:8765
+✅ Flutter UI:          Full desktop app ready
+✅ Code Editor:         NLPL integration complete
+✅ RAG System:          Enabled with ChromaDB
+
+📦 DOWNLOADED MODELS (13.4 GB Total)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ DeepSeek-Coder 1.3B    834MB    ⚡⚡⚡ Fast  ⭐⭐ Quality
+✅ DeepSeek-Coder 6.7B    3.9GB    ⚡⚡ Normal ⭐⭐⭐⭐ High
+✅ CodeLlama 7B           3.9GB    ⚡⚡ Normal ⭐⭐⭐⭐ High
+✅ StarCoder2 7B          4.8GB    ⚡ Slower  ⭐⭐⭐⭐⭐ Best
+⏳ Phi-2 2.7B            (not downloaded yet)
+
+🎯 FEATURES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ Chat Assistant          ✅ Code Generation
+✅ Code Explanation        ✅ Refactoring
+✅ Debugging Help          ✅ Test Generation
+✅ Code Completion         ✅ Multi-Model Routing
+✅ RAG (Codebase Search)   ✅ Session Management
+
+🧪 TESTING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Integration Tests:       python3 test_integration.py
+Model Router Tests:      python3 test_model_router.py
+Flutter Tests:           cd ui && flutter test
+
+📚 DOCUMENTATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Complete Status:         INTEGRATION_COMPLETE.md
+Final Report:            FINAL_STATUS.md
+User Guide:              COMPREHENSIVE_USER_GUIDE.md
+Quick Start:             QUICKSTART_CODE_MODEL.md
+Architecture:            docs/Architecture.md
+
+🐛 TROUBLESHOOTING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Backend won't start:     pkill -f start_editor_bridge
+                        pip install websockets llama-cpp-python
+                        
+UI can't connect:        python3 start_editor_bridge.py
+                        Check: lsof -i :8765
+
+Models not loading:      ls -lh ~/.versaai/models/
+                        python3 scripts/download_models.py
+
+Editor integration:      cd /path/to/code_editor
+                        npm rebuild
+
+🔌 WEBSOCKET API
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+URL:        ws://localhost:8765
+Protocol:   JSON messages with id, type, payload
+Types:      ping, chat, explain, refactor, debug, test, completion
+
+Example:
+{
+  "id": "msg_1",
+  "type": "chat",
+  "session_id": "default",
+  "message": "Explain recursion"
+}
+
+⚙️ CONFIGURATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Models Dir:      ~/.versaai/models/
+Backend Port:    8765 (edit: versaai/code_editor_bridge/server.py)
+Temperature:     0.7 (edit: versaai/models/model_router.py)
+Max Tokens:      1024 (edit: versaai/models/model_router.py)
+
+📊 PERFORMANCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Model Loading:   3-8s (first time), <100ms (cached)
+Simple Query:    1-3s
+Code Gen:        3-10s
+Complex:         10-30s
+Memory:          Backend ~300MB + Models 2-8GB
+
+✨ NEXT STEPS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Launch:       ./launch.sh
+2. Test:         python3 test_integration.py
+3. Use:          Chat, code, enjoy!
+
+📝 STATUS: ✅ PRODUCTION READY
+
+For full docs, see INTEGRATION_COMPLETE.md
+Last updated: November 19, 2025

@@ -1,0 +1,71 @@
+# VersaAI Default Configuration
+# Override with environment variables (VERSAAI_ prefix) or .env file
+
+app_name: VersaAI
+version: "0.2.0"
+debug: false
+data_dir: "~/.versaai"
+log_level: INFO
+
+models:
+  # Default provider for all requests
+  default_provider: ollama
+  code_provider: ollama
+  chat_provider: ollama
+  embedding_model: all-MiniLM-L6-v2
+
+  ollama:
+    enabled: true
+    base_url: "http://localhost:11434"
+    default_model: "qwen2.5-coder:7b"
+    timeout: 120
+
+  llamacpp:
+    enabled: true
+    model_dir: "~/.versaai/models"
+    n_gpu_layers: -1  # -1 = all layers to GPU
+    n_ctx: 4096
+    n_batch: 512
+    n_threads: 0  # 0 = auto-detect
+
+  openai:
+    enabled: false  # Requires VERSAAI_MODELS__OPENAI__API_KEY env var
+    base_url: "https://api.openai.com/v1"
+    default_model: "gpt-4o"
+    timeout: 120
+
+  anthropic:
+    enabled: false  # Requires VERSAAI_MODELS__ANTHROPIC__API_KEY env var
+    default_model: "claude-sonnet-4-20250514"
+    timeout: 120
+
+  huggingface:
+    enabled: false  # Heavy dependencies, enable if needed
+    cache_dir: "~/.cache/huggingface"
+    default_model: "Qwen/Qwen2.5-Coder-7B-Instruct"
+    quantization: "4bit"
+    device: auto
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  cors_origins:
+    - "*"
+  log_level: info
+  workers: 1
+  reload: false
+
+rag:
+  enabled: true
+  vector_store_backend: chromadb
+  vector_store_dir: "~/.versaai/data/vectorstore"
+  chunk_size: 512
+  chunk_overlap: 64
+  top_k: 5
+  similarity_threshold: 0.7
+
+memory:
+  conversation_max_turns: 50
+  context_window_tokens: 4096
+  persistence_dir: "~/.versaai/data/memory"
+  auto_save: true

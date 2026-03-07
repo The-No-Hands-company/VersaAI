@@ -1,0 +1,14 @@
+add_library(Chatbots
+    ChatbotAI.cpp
+    ChatbotAI.hpp
+    VersaAIChatbot.cpp
+    VersaAIChatbot.hpp
+    VersaOSChatbot.cpp
+    VersaOSChatbot.hpp
+    VersaModelingChatbot.cpp
+    VersaModelingChatbot.hpp
+    VGEChatbot.cpp
+    VGEChatbot.hpp
+    DevelopmentChatbot.cpp
+    DevelopmentChatbot.hpp
+)

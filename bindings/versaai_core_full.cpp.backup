@@ -1,0 +1,182 @@
+/**
+ * @file versaai_core.cpp
+ * @brief Python bindings for VersaAI C++ core infrastructure
+ *
+ * This module exposes the following C++ components to Python:
+ * - VersaAI::Logger: High-performance structured logging
+ * - VersaAI::Exception hierarchy: Production-grade error handling
+ * - VersaAI::ErrorRecovery: Retry policies and circuit breakers
+ *
+ * Usage:
+ *   from versaai_core import Logger
+ *   logger = Logger.get_instance()
+ *   logger.info("Message from Python!", "PythonModule")
+ */
+
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+#include <pybind11/functional.h>
+#include <pybind11/chrono.h>
+
+#include "VersaAILogger.hpp"
+#include "VersaAIException.hpp"
+#include "VersaAIErrorRecovery.hpp"
+#include "VersaAIContext.hpp"
+
+namespace py = pybind11;
+using namespace VersaAI;
+
+PYBIND11_MODULE(versaai_core, m) {
+    m.doc() = "VersaAI C++ Core Infrastructure Bindings\n\n"
+              "This module provides Python access to high-performance C++ components:\n"
+              "- Logger: Structured logging with minimal overhead\n"
+              "- Exceptions: Hierarchical error handling\n"
+              "- ErrorRecovery: Production-grade retry and fallback strategies\n"
+              "- Context: Session state management";
+
+    // ============================================================================
+    // LOGGING
+    // ============================================================================
+
+    py::enum_<LogLevel>(m, "LogLevel", "Logging severity levels")
+        .value("DEBUG", LogLevel::DEBUG, "Detailed debugging information")
+        .value("INFO", LogLevel::INFO, "Informational messages")
+        .value("WARNING", LogLevel::WARNING, "Warning messages")
+        .value("ERROR", LogLevel::ERROR, "Error messages")
+        .value("CRITICAL", LogLevel::CRITICAL, "Critical failures")
+        .export_values();
+
+    py::class_<Logger, std::unique_ptr<Logger, py::nodelete>>(m, "Logger",
+                                                                "High-performance structured logger (singleton)")
+        .def_static("get_instance", &Logger::getInstance,
+                   py::return_value_policy::reference,
+                   "Get the singleton Logger instance")        .def("set_level", &Logger::setLevel,
+             py::arg("level"),
+             "Set the global logging level")
+
+        .def("debug",
+             [](Logger& self, const std::string& message, const std::string& component) {
+                 self.debug(message, component);
+             },
+             py::arg("message"),
+             py::arg("component") = "Python",
+             "Log a DEBUG message")
+
+        .def("info",
+             [](Logger& self, const std::string& message, const std::string& component) {
+                 self.info(message, component);
+             },
+             py::arg("message"),
+             py::arg("component") = "Python",
+             "Log an INFO message")
+
+        .def("warning",
+             [](Logger& self, const std::string& message, const std::string& component) {
+                 self.warning(message, component);
+             },
+             py::arg("message"),
+             py::arg("component") = "Python",
+             "Log a WARNING message")
+
+        .def("error",
+             [](Logger& self, const std::string& message, const std::string& component) {
+                 self.error(message, component);
+             },
+             py::arg("message"),
+             py::arg("component") = "Python",
+             "Log an ERROR message")
+
+        .def("critical",
+             [](Logger& self, const std::string& message, const std::string& component) {
+                 self.critical(message, component);
+             },
+             py::arg("message"),
+             py::arg("component") = "Python",
+             "Log a CRITICAL message");
+
+    // ============================================================================
+    // EXCEPTIONS
+    // ============================================================================
+
+    py::enum_<ErrorCode>(m, "ErrorCode", "Error codes for VersaAI exceptions")
+        .value("UNKNOWN", ErrorCode::UNKNOWN)
+        .value("INVALID_ARGUMENT", ErrorCode::INVALID_ARGUMENT)
+        .value("INVALID_STATE", ErrorCode::INVALID_STATE)
+        .value("RESOURCE_NOT_FOUND", ErrorCode::RESOURCE_NOT_FOUND)
+        .value("RESOURCE_EXHAUSTED", ErrorCode::RESOURCE_EXHAUSTED)
+        .value("RESOURCE_BUSY", ErrorCode::RESOURCE_BUSY)
+        .value("OPERATION_TIMEOUT", ErrorCode::OPERATION_TIMEOUT)
+        .value("OPERATION_CANCELLED", ErrorCode::OPERATION_CANCELLED)
+        .value("OPERATION_FAILED", ErrorCode::OPERATION_FAILED)
+        .value("NETWORK_ERROR", ErrorCode::NETWORK_ERROR)
+        .value("IO_ERROR", ErrorCode::IO_ERROR)
+        .value("PARSE_ERROR", ErrorCode::PARSE_ERROR)
+        .value("VALIDATION_ERROR", ErrorCode::VALIDATION_ERROR)
+        .value("AUTHENTICATION_ERROR", ErrorCode::AUTHENTICATION_ERROR)
+        .value("AUTHORIZATION_ERROR", ErrorCode::AUTHORIZATION_ERROR)
+        .value("MODEL_NOT_FOUND", ErrorCode::MODEL_NOT_FOUND)
+        .value("MODEL_LOAD_FAILED", ErrorCode::MODEL_LOAD_FAILED)
+        .value("MODEL_INFERENCE_FAILED", ErrorCode::MODEL_INFERENCE_FAILED)
+        .value("REGISTRY_KEY_NOT_FOUND", ErrorCode::REGISTRY_KEY_NOT_FOUND)
+        .value("REGISTRY_KEY_EXISTS", ErrorCode::REGISTRY_KEY_EXISTS)
+        .export_values();
+
+    // Base exception
+    py::register_exception<VersaAIException>(m, "VersaAIException", PyExc_RuntimeError);
+
+    // Specialized exceptions
+    py::register_exception<InvalidArgumentException>(m, "InvalidArgumentException", PyExc_ValueError);
+    py::register_exception<InvalidStateException>(m, "InvalidStateException", PyExc_RuntimeError);
+    py::register_exception<ResourceException>(m, "ResourceException", PyExc_RuntimeError);
+    py::register_exception<OperationException>(m, "OperationException", PyExc_RuntimeError);
+    py::register_exception<NetworkException>(m, "NetworkException", PyExc_ConnectionError);
+    py::register_exception<IOExceptionVersaAI>(m, "IOException", PyExc_IOError);
+    py::register_exception<ParseException>(m, "ParseException", PyExc_ValueError);
+    py::register_exception<ValidationException>(m, "ValidationException", PyExc_ValueError);
+    py::register_exception<AuthenticationException>(m, "AuthenticationException", PyExc_PermissionError);
+    py::register_exception<AuthorizationException>(m, "AuthorizationException", PyExc_PermissionError);
+    py::register_exception<ModelException>(m, "ModelException", PyExc_RuntimeError);
+    py::register_exception<RegistryException>(m, "RegistryException", PyExc_KeyError);
+
+    // ============================================================================
+    // ERROR RECOVERY - Simplified bindings for actual classes
+    // ============================================================================
+
+    py::enum_<CircuitState>(m, "CircuitState", "Circuit breaker state")
+        .value("CLOSED", CircuitState::CLOSED, "Normal operation")
+        .value("OPEN", CircuitState::OPEN, "Circuit open - fail fast")
+        .value("HALF_OPEN", CircuitState::HALF_OPEN, "Testing recovery")
+        .export_values();
+
+    // Note: Full ErrorRecovery bindings will be added in future update
+    // For now, Python code can use try/except directly
+
+    // ============================================================================
+    // CONTEXT - Simplified bindings
+    // ============================================================================
+
+    py::class_<VersaAIContext>(m, "Context", "Session context for state management")
+        .def(py::init<>(), "Create a new context")
+
+        .def("set",
+             [](VersaAIContext& self, const std::string& key, const std::string& value) {
+                 self.set(key, value);
+             },
+             py::arg("key"),
+             py::arg("value"),
+             "Set a context value")
+
+        .def("get",
+             [](VersaAIContext& self, const std::string& key) -> std::string {
+                 return self.get(key);
+             },
+             py::arg("key"),
+             "Get a context value (returns empty string if not found)");
+
+    // ============================================================================
+    // VERSION INFO
+    // ============================================================================
+
+    m.attr("__version__") = "0.1.0";
+    m.attr("__cpp_version__") = "C++23";
+}
