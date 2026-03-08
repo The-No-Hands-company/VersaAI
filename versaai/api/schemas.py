@@ -55,6 +55,11 @@ class ChatCompletionRequest(BaseModel):
         default=None,
         description="Convenience: prepended as system message if messages[0] is not system."
     )
+    conversation_id: Optional[str] = Field(
+        default=None,
+        description="Conversation ID for persistence. If provided, messages are auto-saved "
+        "and prior history is prepended. If omitted, no persistence."
+    )
 
 
 # ============================================================================

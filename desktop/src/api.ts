@@ -43,12 +43,14 @@ export async function chatSend(
   model?: string,
   temperature?: number,
   maxTokens?: number,
+  conversationId?: string,
 ): Promise<ChatResponse> {
   return invoke<ChatResponse>("chat_send", {
     messages,
     model: model ?? null,
     temperature: temperature ?? null,
     maxTokens: maxTokens ?? null,
+    conversationId: conversationId ?? null,
   });
 }
 

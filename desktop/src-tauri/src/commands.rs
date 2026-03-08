@@ -20,6 +20,7 @@ pub struct ChatRequest {
     pub temperature: Option<f64>,
     pub max_tokens: Option<u32>,
     pub stream: Option<bool>,
+    pub conversation_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -47,6 +48,7 @@ pub struct AgentInfo {
 pub struct AgentExecRequest {
     pub agent: String,
     pub task: String,
+    pub timeout: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -80,6 +82,7 @@ pub async fn chat_send(
     model: Option<String>,
     temperature: Option<f64>,
     max_tokens: Option<u32>,
+    conversation_id: Option<String>,
 ) -> Result<ChatResponse, String> {
     let body = ChatRequest {
         model,
@@ -87,6 +90,7 @@ pub async fn chat_send(
         temperature,
         max_tokens,
         stream: Some(false),
+        conversation_id,
     };
 
     let resp = client()
@@ -140,7 +144,7 @@ pub async fn agent_list() -> Result<Vec<AgentInfo>, String> {
 /// Execute an agent task.
 #[tauri::command]
 pub async fn agent_execute(agent: String, task: String) -> Result<serde_json::Value, String> {
-    let body = AgentExecRequest { agent, task };
+    let body = AgentExecRequest { agent, task, timeout: Some(300.0) };
 
     let resp = client()
         .post(format!("{API_BASE}/v1/agents/execute"))

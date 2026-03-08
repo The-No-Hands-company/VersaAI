@@ -5,6 +5,7 @@ import { chatSend, type ChatMessage } from "../api";
 let messages: ChatMessage[] = [];
 let loading = false;
 let containerEl: HTMLElement | null = null;
+let conversationId: string = crypto.randomUUID();
 
 export function renderChat(el: HTMLElement) {
   containerEl = el;
@@ -57,7 +58,7 @@ async function handleSend(input: HTMLTextAreaElement) {
   updateSendButton();
 
   try {
-    const resp = await chatSend(messages);
+    const resp = await chatSend(messages, undefined, undefined, undefined, conversationId);
     const reply = resp.choices?.[0]?.message;
     if (reply) {
       messages.push(reply);
