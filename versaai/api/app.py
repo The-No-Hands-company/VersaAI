@@ -31,7 +31,7 @@ from fastapi.responses import JSONResponse
 
 from versaai.config import settings
 from versaai.api.provider_registry import get_registry
-from versaai.api.routes import chat, models, health, agents
+from versaai.api.routes import chat, models, health, agents, rag, memory
 
 # ============================================================================
 # Logging
@@ -153,6 +153,8 @@ app.include_router(chat.router, tags=["Chat"])
 app.include_router(models.router, tags=["Models"])
 app.include_router(health.router, tags=["Health"])
 app.include_router(agents.router, tags=["Agents"])
+app.include_router(rag.router, tags=["RAG"])
+app.include_router(memory.router, tags=["Memory"])
 
 
 # ============================================================================

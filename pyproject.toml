@@ -29,6 +29,9 @@ dependencies = [
 
     # Logging
     "structlog>=23.0.0",
+
+    # Persistence (lightweight — always available)
+    "aiosqlite>=0.20.0",
 ]
 
 [project.optional-dependencies]
@@ -45,11 +48,9 @@ ml = [
 rag = [
     "chromadb>=0.4.0",
     "sentence-transformers>=2.2.0",
-    "langchain>=0.1.0",
-    "langchain-community>=0.0.10",
-    "langchain-core>=0.1.0",
     "faiss-cpu>=1.7.0",
-    "beautifulsoup4>=4.12.0",
+    "rank-bm25>=0.2.2",
+    "aiosqlite>=0.20.0",
 ]
 
 # All optional deps
@@ -139,9 +140,9 @@ warn_no_return = true
 [[tool.mypy.overrides]]
 module = [
     "transformers.*",
-    "langchain.*",
     "chromadb.*",
     "llama_cpp.*",
+    "rank_bm25.*",
 ]
 ignore_missing_imports = true
 

@@ -102,7 +102,7 @@ class ServerConfig(BaseModel):
 class RAGConfig(BaseModel):
     """RAG pipeline configuration."""
     enabled: bool = True
-    vector_store_backend: Literal["chromadb", "faiss", "memory"] = "chromadb"
+    vector_store_backend: Literal["chromadb", "faiss", "memory"] = "memory"
     vector_store_dir: str = "~/.versaai/data/vectorstore"
     chunk_size: int = 512
     chunk_overlap: int = 64

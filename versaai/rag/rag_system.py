@@ -1,77 +1,242 @@
 """
-RAG System - Unified interface for RAG components
+VersaAI RAG System — unified facade for document ingestion, retrieval, and Q&A.
 
-Provides a simple interface to the RAG pipeline for use in CodeModel and other components.
+This is the primary public interface for the RAG subsystem.  It wires together:
+- DocumentChunker  → splits raw text into overlapping chunks
+- EmbeddingModel   → embeds chunks and queries (Ollama / sentence-transformers)
+- VectorStore      → stores and searches embeddings (ChromaDB / FAISS / memory)
+
+Usage:
+    >>> from versaai.rag.rag_system import RAGSystem
+    >>> rag = RAGSystem()                               # auto-configures
+    >>> rag.ingest("VersaAI documentation goes here...", metadata={"source": "docs"})
+    >>> results = rag.query("How does the agent system work?", top_k=5)
+    >>> for r in results:
+    ...     print(r["score"], r["document"][:80])
 """
 
-from typing import List, Dict, Any, Optional
-from versaai.memory.vector_db import VectorDatabase
-from versaai.memory.knowledge_graph import KnowledgeGraph
+from __future__ import annotations
+
+import logging
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import numpy as np
+
+from versaai.config import settings
+from versaai.rag.chunker import DocumentChunker, ChunkerConfig
+from versaai.rag.embeddings import EmbeddingModel, EmbeddingConfig
+from versaai.rag.vector_store import VectorStore, VectorStoreConfig, VectorStoreType
+
+logger = logging.getLogger(__name__)
 
 
 class RAGSystem:
     """
-    Unified RAG (Retrieval-Augmented Generation) system
-    
-    Provides document retrieval and knowledge augmentation for generation tasks.
+    End-to-end Retrieval-Augmented Generation system.
+
+    Lifecycle:
+        1. ``ingest(text)``   — chunk → embed → store
+        2. ``query(question)`` — embed question → search store → return docs
+
+    The system is lazily initialized: the embedding model and vector store
+    are created on first use to avoid startup cost when RAG is not needed.
     """
-    
+
     def __init__(
         self,
-        vector_db: Optional[VectorDatabase] = None,
-        knowledge_graph: Optional[KnowledgeGraph] = None
+        embedding_config: Optional[EmbeddingConfig] = None,
+        vector_store_config: Optional[VectorStoreConfig] = None,
+        chunker_config: Optional[ChunkerConfig] = None,
     ):
-        self.vector_db = vector_db
-        self.knowledge_graph = knowledge_graph
-    
-    def retrieve(
+        self._emb_cfg = embedding_config
+        self._vs_cfg = vector_store_config
+        self._chunk_cfg = chunker_config
+
+        self._embedding_model: Optional[EmbeddingModel] = None
+        self._vector_store: Optional[VectorStore] = None
+        self._chunker: Optional[DocumentChunker] = None
+
+        self._total_ingested: int = 0
+        self._total_queries: int = 0
+
+    # ------------------------------------------------------------------
+    # Lazy component init
+    # ------------------------------------------------------------------
+
+    @property
+    def embedding_model(self) -> EmbeddingModel:
+        if self._embedding_model is None:
+            cfg = self._emb_cfg or EmbeddingConfig()
+            self._embedding_model = EmbeddingModel(cfg)
+            logger.info("RAGSystem: embedding model ready (%s)", self._embedding_model.backend_name)
+        return self._embedding_model
+
+    @property
+    def vector_store(self) -> VectorStore:
+        if self._vector_store is None:
+            if self._vs_cfg:
+                cfg = self._vs_cfg
+            else:
+                # Build config from global settings
+                backend_map = {
+                    "chromadb": VectorStoreType.CHROMADB,
+                    "faiss": VectorStoreType.FAISS,
+                    "memory": VectorStoreType.MEMORY,
+                }
+                cfg = VectorStoreConfig(
+                    store_type=backend_map.get(
+                        settings.rag.vector_store_backend, VectorStoreType.MEMORY
+                    ),
+                    persist_directory=Path(settings.rag.vector_store_dir).expanduser(),
+                    embedding_dimension=self.embedding_model.dimension,
+                    collection_name="versaai_documents",
+                )
+            try:
+                self._vector_store = VectorStore(cfg, embedding_model=self.embedding_model)
+            except (ImportError, Exception) as exc:
+                if cfg.store_type != VectorStoreType.MEMORY:
+                    logger.warning(
+                        "RAGSystem: %s backend failed (%s), falling back to in-memory",
+                        cfg.store_type.value, exc,
+                    )
+                    cfg = VectorStoreConfig(
+                        store_type=VectorStoreType.MEMORY,
+                        embedding_dimension=self.embedding_model.dimension,
+                        collection_name="versaai_documents",
+                    )
+                    self._vector_store = VectorStore(cfg, embedding_model=self.embedding_model)
+                else:
+                    raise
+            logger.info("RAGSystem: vector store ready (%s)", self._vector_store)
+        return self._vector_store
+
+    @property
+    def chunker(self) -> DocumentChunker:
+        if self._chunker is None:
+            self._chunker = DocumentChunker(self._chunk_cfg or ChunkerConfig())
+        return self._chunker
+
+    # ------------------------------------------------------------------
+    # Ingest
+    # ------------------------------------------------------------------
+
+    def ingest(
         self,
-        query: str,
-        top_k: int = 5,
-        filters: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        text: str,
+        metadata: Optional[Dict[str, Any]] = None,
+        doc_id_prefix: Optional[str] = None,
+    ) -> int:
         """
-        Retrieve relevant documents for a query
-        
+        Ingest a document: chunk → embed → store.
+
         Args:
-            query: Query string
-            top_k: Number of results to return
-            filters: Optional metadata filters
-            
+            text: Raw document text.
+            metadata: Optional metadata dict propagated to every chunk.
+            doc_id_prefix: Optional prefix for chunk IDs.
+
         Returns:
-            Dict with 'documents', 'scores', 'metadata'
+            Number of chunks stored.
         """
-        if not self.vector_db:
-            return {"documents": [], "scores": [], "metadata": []}
-        
-        # TODO: Generate query embedding
-        # For now, return empty results
+        t0 = time.perf_counter()
+        chunks = self.chunker.split(text, metadata=metadata)
+        if not chunks:
+            return 0
+
+        texts = [c.text for c in chunks]
+        metas = [c.metadata for c in chunks]
+
+        prefix = doc_id_prefix or f"doc{self._total_ingested}"
+        ids = [f"{prefix}_chunk_{i}" for i in range(len(texts))]
+
+        self.vector_store.add_documents(documents=texts, metadata=metas, ids=ids)
+        self._total_ingested += len(texts)
+
+        elapsed = time.perf_counter() - t0
+        logger.info(
+            "Ingested %d chunks in %.2fs (total: %d)",
+            len(texts), elapsed, self._total_ingested,
+        )
+        return len(texts)
+
+    def ingest_documents(
+        self,
+        documents: List[Dict[str, Any]],
+        text_key: str = "text",
+    ) -> int:
+        """Ingest a list of document dicts; each is chunked and stored."""
+        total = 0
+        for i, doc in enumerate(documents):
+            text = doc.get(text_key, "")
+            meta = {k: v for k, v in doc.items() if k != text_key}
+            total += self.ingest(text, metadata=meta, doc_id_prefix=f"batch{i}")
+        return total
+
+    # ------------------------------------------------------------------
+    # Query
+    # ------------------------------------------------------------------
+
+    def query(
+        self,
+        question: str,
+        top_k: Optional[int] = None,
+        filter_metadata: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve the most relevant chunks for a question.
+
+        Returns:
+            List of dicts with keys: id, document, score, metadata
+        """
+        k = top_k or settings.rag.top_k or 5
+        t0 = time.perf_counter()
+
+        results = self.vector_store.search(question, k=k, filter_metadata=filter_metadata)
+        self._total_queries += 1
+
+        elapsed = time.perf_counter() - t0
+        logger.info(
+            "Query returned %d results in %.3fs (q=%d total)",
+            len(results), elapsed, self._total_queries,
+        )
+        return results
+
+    # ------------------------------------------------------------------
+    # Corpus access
+    # ------------------------------------------------------------------
+
+    def get_all_documents(self) -> List[Dict[str, Any]]:
+        """Return every stored document (for BM25 / sparse retrieval)."""
+        return self.vector_store.get_all_documents()
+
+    # ------------------------------------------------------------------
+    # Stats
+    # ------------------------------------------------------------------
+
+    def stats(self) -> Dict[str, Any]:
         return {
-            "documents": [],
-            "scores": [],
-            "metadata": []
+            "total_ingested": self._total_ingested,
+            "total_queries": self._total_queries,
+            "store_count": self.vector_store.count() if self._vector_store else 0,
+            "embedding_backend": (
+                self._embedding_model.backend_name if self._embedding_model else "not initialized"
+            ),
+            "vector_store": repr(self._vector_store) if self._vector_store else "not initialized",
         }
-    
-    def add_document(
-        self,
-        document: str,
-        metadata: Optional[Dict[str, Any]] = None
-    ):
-        """Add a document to the knowledge base"""
-        if self.vector_db:
-            # TODO: Generate embedding
-            pass
-    
-    def query_knowledge_graph(
-        self,
-        entity: str,
-        max_hops: int = 2
-    ) -> List[str]:
-        """Query knowledge graph for related entities"""
-        if not self.knowledge_graph:
-            return []
-        
-        try:
-            return self.knowledge_graph.query_related(entity, max_hops)
-        except:
-            return []
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def close(self):
+        if self._embedding_model:
+            self._embedding_model.close()
+            self._embedding_model = None
+        self._vector_store = None
+
+    def __repr__(self) -> str:
+        return (
+            f"RAGSystem(ingested={self._total_ingested}, "
+            f"queries={self._total_queries})"
+        )

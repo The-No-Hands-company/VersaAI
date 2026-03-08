@@ -37,6 +37,8 @@ def __getattr__(name: str):
         "EntityType": "versaai.memory.knowledge_graph",
         "EpisodicMemory": "versaai.memory.episodic",
         "Episode": "versaai.memory.episodic",
+        # Persistence (Phase 2 — SQLite conversation storage)
+        "ConversationDB": "versaai.memory.persistence",
     }
     if name in _lazy_map:
         module = _importlib.import_module(_lazy_map[name])
@@ -61,6 +63,9 @@ __all__ = [
     "EntityType",
     "EpisodicMemory",
     "Episode",
+
+    # Persistence
+    "ConversationDB",
 ]
 
 __version__ = "0.2.0"  # Phase 3.2 complete

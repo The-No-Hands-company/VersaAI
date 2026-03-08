@@ -54,8 +54,7 @@ class ResearchAgent(AgentBase):
         super().__init__(metadata)
 
         self.llm = None
-        self.vector_store = None
-        self.retriever = None
+        self.rag = None  # RAGSystem instance (lazy)
         self.tools: List[Dict[str, Any]] = []
         self.memory: Dict[str, Any] = {}
         self.config: Dict[str, Any] = {}
@@ -87,10 +86,13 @@ class ResearchAgent(AgentBase):
         # 1. LLM
         self._init_llm()
 
-        # 2. Tools
+        # 2. RAG
+        self._init_rag()
+
+        # 3. Tools
         self._init_tools()
 
-        # 3. Memory
+        # 4. Memory
         self.memory = {"messages": [], "context": {}}
 
         self._initialized = True
@@ -113,6 +115,17 @@ class ResearchAgent(AgentBase):
             max_tokens=self.config.get("max_tokens", 1024),
         )
         self.logger.info(f"LLM initialized: {self.llm}")
+
+    def _init_rag(self) -> None:
+        """Initialize RAG system for document retrieval."""
+        try:
+            from versaai.rag.rag_system import RAGSystem
+
+            self.rag = RAGSystem()
+            self.logger.info("RAG system initialized")
+        except Exception as exc:
+            self.logger.warning(f"RAG system unavailable ({exc}), retrieval disabled")
+            self.rag = None
 
     def _init_tools(self) -> None:
         """Initialize lightweight tools."""
@@ -164,8 +177,8 @@ class ResearchAgent(AgentBase):
         sub_queries = self._decompose_query(task)
         self.logger.debug(f"Decomposed into {len(sub_queries)} sub-queries")
 
-        # Step 2: Retrieval (future: vector DB)
-        if self.retriever:
+        # Step 2: RAG retrieval
+        if self.rag:
             steps.append("retrieval")
             retrieved_docs = self._retrieve_documents(sub_queries)
             sources.extend(retrieved_docs)
@@ -244,8 +257,33 @@ class ResearchAgent(AgentBase):
         return [query]
 
     def _retrieve_documents(self, queries: List[str]) -> List[Dict[str, Any]]:
-        """Retrieve from vector store (placeholder until RAG is integrated)."""
-        return []
+        """Retrieve relevant documents from the RAG system for each sub-query."""
+        if not self.rag:
+            return []
+
+        all_results: List[Dict[str, Any]] = []
+        seen_ids: set = set()
+
+        for query in queries:
+            try:
+                results = self.rag.query(query, top_k=3)
+                for r in results:
+                    doc_text = r.get("document") or r.get("content", "")
+                    doc_id = r.get("id", doc_text[:64])
+                    if doc_id not in seen_ids:
+                        seen_ids.add(doc_id)
+                        all_results.append({
+                            "content": doc_text,
+                            "metadata": r.get("metadata", {}),
+                            "score": r.get("score", 0.0),
+                            "source": r.get("metadata", {}).get("source", "rag"),
+                        })
+            except Exception as exc:
+                self.logger.warning(f"RAG query failed for '{query[:60]}': {exc}")
+
+        # Sort by relevance score descending
+        all_results.sort(key=lambda x: x.get("score", 0.0), reverse=True)
+        return all_results[:10]  # Cap at 10 most relevant
 
     # ------------------------------------------------------------------
     # Generation

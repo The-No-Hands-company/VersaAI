@@ -1,204 +1,359 @@
 """
-Production-grade embedding model wrapper for VersaAI RAG system.
+VersaAI Embedding System — multi-backend embedding generation.
 
-Supports:
-- Sentence transformers (BERT, MPNet, etc.)
-- OpenAI embeddings (API)
-- Custom embedding models
-- Multimodal embeddings (text, code, images)
-- Batch processing with optimal performance
+Supports (in priority order):
+1. Ollama /api/embed – zero extra deps, uses running Ollama server
+2. sentence-transformers – local HuggingFace models (optional)
+3. Hash-based fallback – deterministic pseudo-embeddings for testing only
+
+Usage:
+    >>> from versaai.rag.embeddings import EmbeddingModel, EmbeddingConfig
+    >>> model = EmbeddingModel()                    # auto-detect best backend
+    >>> vec = model.embed_text("Hello, world!")     # → np.ndarray (dim,)
+    >>> batch = model.embed_texts(["a", "b", "c"]) # → np.ndarray (3, dim)
+    >>> sim = model.similarity(vec, batch[0])       # → float in [-1, 1]
 """
 
-from typing import List, Optional, Dict, Any, Union
-from dataclasses import dataclass
-import numpy as np
-from pathlib import Path
+from __future__ import annotations
 
-try:
-    import versaai_core
-    CPPLogger = versaai_core.Logger.get_instance()
-    HAS_CPP_LOGGER = True
-except (ImportError, AttributeError):
-    import logging
-    CPPLogger = logging.getLogger(__name__)
-    HAS_CPP_LOGGER = False
+import hashlib
+import logging
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Union
+
+import numpy as np
+
+from versaai.config import settings
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
 
 
 @dataclass
 class EmbeddingConfig:
-    """Configuration for embedding models."""
-    
-    model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
-    device: str = "cpu"  # "cpu", "cuda", "mps"
+    """Configuration for the embedding system."""
+
+    # Backend selection: "ollama" | "sentence-transformers" | "auto"
+    backend: str = "auto"
+
+    # Ollama settings
+    ollama_base_url: str = ""  # empty → from settings
+    ollama_model: str = "nomic-embed-text"
+
+    # sentence-transformers settings
+    st_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
+    device: str = "cpu"
+
+    # Shared settings
     normalize_embeddings: bool = True
-    batch_size: int = 32
+    batch_size: int = 64
     max_seq_length: Optional[int] = None
     cache_dir: Optional[Path] = None
     show_progress: bool = False
 
+    # LRU cache for repeated texts (0 = disabled)
+    cache_size: int = 4096
+
+
+# ---------------------------------------------------------------------------
+# Backend implementations
+# ---------------------------------------------------------------------------
+
+
+class _OllamaEmbeddingBackend:
+    """Embed via Ollama /api/embed (batch-capable)."""
+
+    def __init__(self, base_url: str, model: str, timeout: int = 120):
+        import httpx
+
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self._client = httpx.Client(
+            base_url=self.base_url,
+            timeout=httpx.Timeout(timeout, connect=10.0),
+        )
+        self.dimension: Optional[int] = None
+
+    def embed_batch(self, texts: List[str]) -> np.ndarray:
+        """Embed one or more texts in a single API call."""
+        payload = {"model": self.model, "input": texts}
+        r = self._client.post("/api/embed", json=payload)
+        r.raise_for_status()
+        data = r.json()
+        embeddings = data.get("embeddings", [])
+        if not embeddings:
+            raise RuntimeError(f"Ollama returned no embeddings for model {self.model}")
+        arr = np.asarray(embeddings, dtype=np.float32)
+        if self.dimension is None:
+            self.dimension = arr.shape[1]
+        return arr
+
+    def probe_dimension(self) -> int:
+        """Embed a single token to discover the embedding dimension."""
+        arr = self.embed_batch(["test"])
+        self.dimension = arr.shape[1]
+        return self.dimension
+
+    def close(self):
+        self._client.close()
+
+
+class _SentenceTransformerBackend:
+    """Embed via local sentence-transformers model."""
+
+    def __init__(self, config: EmbeddingConfig):
+        from sentence_transformers import SentenceTransformer
+
+        self.model = SentenceTransformer(
+            config.st_model_name,
+            device=config.device,
+            cache_folder=str(config.cache_dir) if config.cache_dir else None,
+        )
+        if config.max_seq_length:
+            self.model.max_seq_length = config.max_seq_length
+        self.dimension: int = self.model.get_sentence_embedding_dimension()
+        self._normalize = config.normalize_embeddings
+        self._batch_size = config.batch_size
+        self._show = config.show_progress
+
+    def embed_batch(self, texts: List[str]) -> np.ndarray:
+        return self.model.encode(
+            texts,
+            batch_size=self._batch_size,
+            show_progress_bar=self._show,
+            normalize_embeddings=self._normalize,
+            convert_to_numpy=True,
+        )
+
+    def close(self):
+        pass
+
+
+class _HashEmbeddingBackend:
+    """
+    Deterministic hash-based pseudo-embeddings.
+
+    NOT suitable for production — provides zero semantic similarity.
+    Useful only for integration testing when no model server is available.
+    """
+
+    def __init__(self, dimension: int = 384):
+        self.dimension = dimension
+
+    def embed_batch(self, texts: List[str]) -> np.ndarray:
+        out = np.zeros((len(texts), self.dimension), dtype=np.float32)
+        for i, text in enumerate(texts):
+            digest = hashlib.sha256(text.encode("utf-8")).digest()
+            rng = np.random.default_rng(
+                int.from_bytes(digest[:8], byteorder="little")
+            )
+            vec = rng.standard_normal(self.dimension).astype(np.float32)
+            out[i] = vec / (np.linalg.norm(vec) + 1e-10)
+        return out
+
+    def close(self):
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Unified EmbeddingModel
+# ---------------------------------------------------------------------------
+
 
 class EmbeddingModel:
     """
-    Production-grade embedding model with optimal performance.
-    
-    Features:
-    - Automatic batching
-    - GPU acceleration
-    - Normalization
-    - Caching
-    - Multiple backend support
+    Production embedding interface with auto-backend selection.
+
+    Tries backends in order: Ollama → sentence-transformers → hash fallback.
+    Includes an in-memory LRU cache for repeated queries.
     """
-    
+
     def __init__(self, config: Optional[EmbeddingConfig] = None):
-        """Initialize embedding model."""
         self.config = config or EmbeddingConfig()
-        self.model = None
-        self.dimension: Optional[int] = None
-        self._initialize_model()
-    
-    def _initialize_model(self):
-        """Initialize the embedding model based on config."""
+        self._backend: Any = None
+        self.dimension: int = 0
+        self._backend_name: str = "none"
+        self._cache: Dict[str, np.ndarray] = {}
+        self._cache_order: List[str] = []
+        self._initialize()
+
+    # ----- init helpers ---------------------------------------------------
+
+    def _initialize(self):
+        backend = self.config.backend.lower()
+        if backend == "auto":
+            self._try_auto()
+        elif backend == "ollama":
+            self._init_ollama()
+        elif backend in ("sentence-transformers", "st"):
+            self._init_st()
+        elif backend in ("hash", "test"):
+            self._init_hash()
+        else:
+            raise ValueError(f"Unknown embedding backend: {backend}")
+        logger.info(
+            "EmbeddingModel ready: backend=%s  dim=%d", self._backend_name, self.dimension
+        )
+
+    def _try_auto(self):
+        """Auto-detect the best available backend."""
+        # 1. Try Ollama (preferred — zero extra Python deps)
         try:
-            from sentence_transformers import SentenceTransformer
-            
-            if HAS_CPP_LOGGER:
-                CPPLogger.info(
-                    f"Loading embedding model: {self.config.model_name}",
-                    "EmbeddingModel"
-                )
-            else:
-                CPPLogger.info(f"Loading embedding model: {self.config.model_name}")
-            
-            # Load model
-            self.model = SentenceTransformer(
-                self.config.model_name,
-                device=self.config.device,
-                cache_folder=str(self.config.cache_dir) if self.config.cache_dir else None
-            )
-            
-            # Set max sequence length
-            if self.config.max_seq_length:
-                self.model.max_seq_length = self.config.max_seq_length
-            
-            # Get embedding dimension
-            self.dimension = self.model.get_sentence_embedding_dimension()
-            
-            if HAS_CPP_LOGGER:
-                CPPLogger.info(
-                    f"Model loaded: {self.config.model_name} (dim={self.dimension})",
-                    "EmbeddingModel"
-                )
-            else:
-                CPPLogger.info(f"Model loaded: {self.config.model_name} (dim={self.dimension})")
-                
-        except ImportError as e:
-            error_msg = f"Failed to import sentence-transformers: {e}"
-            if HAS_CPP_LOGGER:
-                CPPLogger.error(error_msg, "EmbeddingModel")
-            else:
-                CPPLogger.error(error_msg)
-            raise
-        except Exception as e:
-            error_msg = f"Failed to load embedding model: {e}"
-            if HAS_CPP_LOGGER:
-                CPPLogger.error(error_msg, "EmbeddingModel")
-            else:
-                CPPLogger.error(error_msg)
-            raise
-    
+            self._init_ollama()
+            return
+        except Exception as exc:
+            logger.debug("Ollama embedding unavailable: %s", exc)
+
+        # 2. Try sentence-transformers
+        try:
+            self._init_st()
+            return
+        except Exception as exc:
+            logger.debug("sentence-transformers unavailable: %s", exc)
+
+        # 3. Hash fallback (always available)
+        logger.warning(
+            "No embedding backend available — using hash fallback (no semantic similarity)"
+        )
+        self._init_hash()
+
+    def _init_ollama(self):
+        base_url = self.config.ollama_base_url or settings.models.ollama.base_url
+        timeout = settings.models.ollama.timeout
+        backend = _OllamaEmbeddingBackend(base_url, self.config.ollama_model, timeout)
+        dim = backend.probe_dimension()
+        self._backend = backend
+        self._backend_name = f"ollama/{self.config.ollama_model}"
+        self.dimension = dim
+
+    def _init_st(self):
+        backend = _SentenceTransformerBackend(self.config)
+        self._backend = backend
+        self._backend_name = f"st/{self.config.st_model_name}"
+        self.dimension = backend.dimension
+
+    def _init_hash(self):
+        backend = _HashEmbeddingBackend(dimension=384)
+        self._backend = backend
+        self._backend_name = "hash"
+        self.dimension = backend.dimension
+
+    # ----- public API -----------------------------------------------------
+
     def embed_texts(self, texts: List[str]) -> np.ndarray:
         """
-        Generate embeddings for a list of texts.
-        
-        Args:
-            texts: List of text strings to embed
-            
+        Embed a batch of texts.
+
         Returns:
-            numpy array of shape (len(texts), embedding_dimension)
+            np.ndarray of shape (len(texts), self.dimension)
         """
         if not texts:
-            return np.array([])
-        
-        try:
-            embeddings = self.model.encode(
-                texts,
-                batch_size=self.config.batch_size,
-                show_progress_bar=self.config.show_progress,
-                normalize_embeddings=self.config.normalize_embeddings,
-                convert_to_numpy=True
-            )
-            return embeddings
-            
-        except Exception as e:
-            error_msg = f"Failed to generate embeddings: {e}"
-            if HAS_CPP_LOGGER:
-                CPPLogger.error(error_msg, "EmbeddingModel")
+            return np.empty((0, self.dimension), dtype=np.float32)
+
+        cache = self._cache
+        max_cache = self.config.cache_size
+
+        # Split into cached hits and uncached misses
+        results: List[Optional[np.ndarray]] = [None] * len(texts)
+        uncached_indices: List[int] = []
+        uncached_texts: List[str] = []
+
+        for i, t in enumerate(texts):
+            if max_cache and t in cache:
+                results[i] = cache[t]
             else:
-                CPPLogger.error(error_msg)
-            raise
-    
+                uncached_indices.append(i)
+                uncached_texts.append(t)
+
+        # Batch-embed uncached texts
+        if uncached_texts:
+            batch_size = self.config.batch_size
+            all_embeddings: List[np.ndarray] = []
+            for start in range(0, len(uncached_texts), batch_size):
+                chunk = uncached_texts[start : start + batch_size]
+                emb = self._backend.embed_batch(chunk)
+                if self.config.normalize_embeddings and self._backend_name.startswith("ollama"):
+                    norms = np.linalg.norm(emb, axis=1, keepdims=True)
+                    emb = emb / (norms + 1e-10)
+                all_embeddings.append(emb)
+
+            merged = np.vstack(all_embeddings) if len(all_embeddings) > 1 else all_embeddings[0]
+
+            for j, idx in enumerate(uncached_indices):
+                vec = merged[j]
+                results[idx] = vec
+                if max_cache:
+                    self._cache_put(uncached_texts[j], vec)
+
+        return np.vstack(results)  # type: ignore[arg-type]
+
     def embed_text(self, text: str) -> np.ndarray:
-        """
-        Generate embedding for a single text.
-        
-        Args:
-            text: Text string to embed
-            
-        Returns:
-            numpy array of shape (embedding_dimension,)
-        """
-        embeddings = self.embed_texts([text])
-        return embeddings[0] if len(embeddings) > 0 else np.array([])
-    
+        """Embed a single text string."""
+        return self.embed_texts([text])[0]
+
     def embed_documents(
         self,
         documents: List[Dict[str, Any]],
-        text_key: str = "text"
+        text_key: str = "text",
     ) -> List[Dict[str, Any]]:
-        """
-        Embed documents with metadata preservation.
-        
-        Args:
-            documents: List of document dictionaries
-            text_key: Key in document dict containing text to embed
-            
-        Returns:
-            List of documents with added 'embedding' field
-        """
+        """Embed documents in-place, adding an ``embedding`` field."""
         texts = [doc.get(text_key, "") for doc in documents]
         embeddings = self.embed_texts(texts)
-        
-        # Add embeddings to documents
-        for doc, embedding in zip(documents, embeddings):
-            doc["embedding"] = embedding.tolist()
-        
+        for doc, emb in zip(documents, embeddings):
+            doc["embedding"] = emb.tolist()
         return documents
-    
-    def similarity(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
-        """
-        Calculate cosine similarity between two embeddings.
-        
-        Args:
-            embedding1: First embedding vector
-            embedding2: Second embedding vector
-            
-        Returns:
-            Cosine similarity score (-1 to 1)
-        """
-        # Normalize if not already normalized
-        if not self.config.normalize_embeddings:
-            embedding1 = embedding1 / np.linalg.norm(embedding1)
-            embedding2 = embedding2 / np.linalg.norm(embedding2)
-        
-        return float(np.dot(embedding1, embedding2))
-    
+
+    def similarity(self, a: np.ndarray, b: np.ndarray) -> float:
+        """Cosine similarity between two embedding vectors."""
+        a_f = np.asarray(a, dtype=np.float32).flatten()
+        b_f = np.asarray(b, dtype=np.float32).flatten()
+        dot = float(np.dot(a_f, b_f))
+        denom = float(np.linalg.norm(a_f) * np.linalg.norm(b_f))
+        return dot / denom if denom > 1e-10 else 0.0
+
     def get_dimension(self) -> int:
-        """Get the embedding dimension."""
+        """Return the embedding dimensionality."""
         return self.dimension
-    
+
+    @property
+    def backend_name(self) -> str:
+        return self._backend_name
+
+    # ----- cache helpers --------------------------------------------------
+
+    def _cache_put(self, key: str, value: np.ndarray):
+        cache = self._cache
+        order = self._cache_order
+        if key in cache:
+            order.remove(key)
+        elif len(cache) >= self.config.cache_size:
+            evict_key = order.pop(0)
+            del cache[evict_key]
+        cache[key] = value
+        order.append(key)
+
+    def clear_cache(self):
+        """Flush the embedding cache."""
+        self._cache.clear()
+        self._cache_order.clear()
+
+    # ----- lifecycle ------------------------------------------------------
+
+    def close(self):
+        if self._backend:
+            self._backend.close()
+            self._backend = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
     def __repr__(self) -> str:
-        """String representation."""
-        return (
-            f"EmbeddingModel(model={self.config.model_name}, "
-            f"dim={self.dimension}, device={self.config.device})"
-        )
+        return f"EmbeddingModel(backend={self._backend_name!r}, dim={self.dimension})"
