@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicholasxjy/tauri-capabilities-schema/main/schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for the VersaAI desktop app",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open"
+  ]
+}
