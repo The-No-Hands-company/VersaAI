@@ -8,6 +8,7 @@ Supports:
 - Conversation persistence: optional conversation_id auto-saves messages
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -28,7 +29,7 @@ from versaai.api.schemas import (
     DeltaMessage,
     UsageInfo,
 )
-from versaai.api.provider_registry import get_registry
+from versaai.api.provider_registry import get_registry, retry_sync
 from versaai.api.errors import (
     InvalidModelError,
     InferenceError,
@@ -115,13 +116,13 @@ def _handle_ollama_sync_with_messages(
     provider, model_name: str, req: ChatCompletionRequest, messages: list[dict],
 ) -> ChatCompletionResponse:
     """Handle non-streaming chat via Ollama with pre-built message list."""
-    response = provider.chat(
+    response = retry_sync(lambda: provider.chat(
         messages=messages,
         model=model_name,
         temperature=req.temperature,
         top_p=req.top_p,
         stop=_normalize_stop(req.stop),
-    )
+    ))
 
     content = response.get("message", {}).get("content", "")
 
@@ -152,13 +153,13 @@ def _handle_llamacpp_sync_with_messages(
     provider, model_name: str, req: ChatCompletionRequest, messages: list[dict],
 ) -> ChatCompletionResponse:
     """Handle non-streaming chat via llama.cpp server with pre-built message list."""
-    response = provider.chat(
+    response = retry_sync(lambda: provider.chat(
         messages=messages,
         temperature=req.temperature,
         max_tokens=req.max_tokens or 2048,
         top_p=req.top_p,
         stop=_normalize_stop(req.stop),
-    )
+    ))
 
     # llama.cpp server returns OpenAI-format directly
     choices = response.get("choices", [{}])
@@ -475,11 +476,15 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                 },
             )
         else:
-            # Non-streaming response
+            # Non-streaming response — run sync handlers off the event loop
             if provider_name == "ollama":
-                resp = _handle_ollama_sync_with_messages(provider, model_name, req, all_messages)
+                resp = await asyncio.to_thread(
+                    _handle_ollama_sync_with_messages, provider, model_name, req, all_messages,
+                )
             elif provider_name == "llamacpp":
-                resp = _handle_llamacpp_sync_with_messages(provider, model_name, req, all_messages)
+                resp = await asyncio.to_thread(
+                    _handle_llamacpp_sync_with_messages, provider, model_name, req, all_messages,
+                )
             else:
                 raise HTTPException(status_code=400, detail="Unsupported provider")
 

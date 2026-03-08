@@ -58,6 +58,7 @@ class CodingAgent(AgentBase):
 
         self.llm = None
         self.tool_registry = None
+        self.rag = None  # RAGSystem instance (lazy)
         self.memory: Dict[str, Any] = {}
         self.config: Dict[str, Any] = {}
 
@@ -91,7 +92,10 @@ class CodingAgent(AgentBase):
         # 1. LLM
         self._init_llm()
 
-        # 2. Tools
+        # 2. RAG
+        self._init_rag()
+
+        # 3. Tools
         self._init_tools(work_dir)
 
         # 3. Memory
@@ -119,12 +123,24 @@ class CodingAgent(AgentBase):
         )
         self.logger.info(f"LLM initialized: {self.llm}")
 
+    def _init_rag(self) -> None:
+        """Initialize RAG system for document retrieval."""
+        try:
+            from versaai.rag.rag_system import RAGSystem
+
+            self.rag = RAGSystem()
+            self.logger.info("RAG system initialized")
+        except Exception as exc:
+            self.logger.warning(f"RAG system unavailable ({exc}), retrieval disabled")
+            self.rag = None
+
     def _init_tools(self, work_dir: str) -> None:
         """Register file and shell tools."""
         from versaai.agents.tools import (
             FileReadTool,
             FileSearchTool,
             FileWriteTool,
+            RAGQueryTool,
             ShellTool,
             ToolRegistry,
         )
@@ -137,6 +153,7 @@ class CodingAgent(AgentBase):
             working_dir=work_dir,
             allowed_commands=self.config.get("allowed_commands"),
         ))
+        self.tool_registry.register(RAGQueryTool(rag_system=self.rag))
         self.logger.info(
             f"Tools registered: {list(self.tool_registry._tools.keys())}"
         )
@@ -186,6 +203,28 @@ class CodingAgent(AgentBase):
         if ctx.get("file_content"):
             extra_context = f"\nProvided file content:\n```\n{ctx['file_content']}\n```\n"
 
+        # RAG: retrieve relevant docs to seed the agent with domain knowledge
+        rag_context = ""
+        if self.rag:
+            try:
+                rag_results = self.rag.query(task, top_k=3)
+                if rag_results:
+                    snippets = []
+                    for i, r in enumerate(rag_results, 1):
+                        doc = r.get("document", r.get("content", ""))
+                        if len(doc) > 500:
+                            doc = doc[:500] + "…"
+                        source = r.get("metadata", {}).get("source", "knowledge base")
+                        snippets.append(f"  [{i}] ({source}) {doc}")
+                    rag_context = (
+                        "\nRelevant knowledge base excerpts:\n"
+                        + "\n".join(snippets)
+                        + "\n"
+                    )
+                    self.logger.info(f"Injected {len(rag_results)} RAG docs into prompt")
+            except Exception as exc:
+                self.logger.warning(f"RAG retrieval failed: {exc}")
+
         for step_num in range(1, MAX_REACT_STEPS + 1):
             self.logger.info(f"[ReAct] Step {step_num}/{MAX_REACT_STEPS}")
             if status_cb:
@@ -195,6 +234,7 @@ class CodingAgent(AgentBase):
                 f"You are solving a coding task step-by-step.\n\n"
                 f"Task: {task}\n"
                 f"{extra_context}\n"
+                f"{rag_context}\n"
                 f"Available tools:\n{tool_desc}\n\n"
                 f"Previous steps:\n{history}\n\n"
                 f"Respond in EXACTLY this format:\n"
