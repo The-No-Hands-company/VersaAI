@@ -10,12 +10,16 @@ import time
 import uuid
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ============================================================================
 # Chat Completions — Request
 # ============================================================================
+
+# Maximum size for a single message content (256 KB)
+_MAX_MESSAGE_CONTENT_BYTES = 256 * 1024
+
 
 class ChatMessage(BaseModel):
     """A single message in the conversation."""
@@ -24,6 +28,15 @@ class ChatMessage(BaseModel):
     name: Optional[str] = None
     tool_call_id: Optional[str] = None
     tool_calls: Optional[List[Dict[str, Any]]] = None
+
+    @field_validator("content")
+    @classmethod
+    def content_not_too_large(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v.encode("utf-8", errors="replace")) > _MAX_MESSAGE_CONTENT_BYTES:
+            raise ValueError(
+                f"Message content exceeds maximum size of {_MAX_MESSAGE_CONTENT_BYTES // 1024} KB"
+            )
+        return v
 
 
 class ChatCompletionRequest(BaseModel):
@@ -38,7 +51,8 @@ class ChatCompletionRequest(BaseModel):
         "For llama.cpp server: 'llamacpp/default'. Provider is inferred from prefix."
     )
     messages: List[ChatMessage] = Field(
-        ..., min_length=1, description="Conversation messages."
+        ..., min_length=1, max_length=500,
+        description="Conversation messages (max 500 per request).",
     )
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float = Field(default=0.95, ge=0.0, le=1.0)

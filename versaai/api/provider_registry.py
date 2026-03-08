@@ -11,14 +11,114 @@ Model ID format:  <provider>/<model_name>
         qwen2.5-coder:7b              → default_provider/qwen2.5-coder:7b
 """
 
+import asyncio
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+import random
+import time
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
+
+import httpx
 
 from versaai.config import settings
 from versaai.models.ollama_provider import OllamaProvider
 from versaai.models.llamacpp_provider import LlamaCppServerProvider
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+# ============================================================================
+# Retry helper
+# ============================================================================
+
+_RETRIABLE_EXCEPTIONS = (
+    httpx.ConnectError,
+    httpx.RemoteProtocolError,
+    httpx.ReadTimeout,
+    ConnectionError,
+    OSError,
+)
+
+
+def retry_sync(
+    fn: Callable[..., T],
+    *,
+    max_retries: int = 3,
+    base_delay: float = 0.2,
+    max_delay: float = 5.0,
+) -> T:
+    """
+    Execute `fn()` with exponential-backoff retries on transient errors.
+
+    Only retries on connection/protocol errors. Lets HTTP 4xx errors
+    and non-transient failures propagate immediately.
+    """
+    last_exc: Exception = RuntimeError("unreachable")
+    for attempt in range(max_retries + 1):
+        try:
+            return fn()
+        except _RETRIABLE_EXCEPTIONS as exc:
+            last_exc = exc
+            if attempt == max_retries:
+                break
+            delay = min(base_delay * (2 ** attempt) + random.uniform(0, 0.1), max_delay)
+            logger.warning(
+                f"Retry {attempt + 1}/{max_retries} after {type(exc).__name__}: "
+                f"waiting {delay:.2f}s"
+            )
+            time.sleep(delay)
+        except httpx.HTTPStatusError as exc:
+            # 5xx are retriable, 4xx are not
+            if exc.response.status_code >= 500 and attempt < max_retries:
+                last_exc = exc
+                delay = min(base_delay * (2 ** attempt) + random.uniform(0, 0.1), max_delay)
+                logger.warning(
+                    f"Retry {attempt + 1}/{max_retries} after HTTP {exc.response.status_code}: "
+                    f"waiting {delay:.2f}s"
+                )
+                time.sleep(delay)
+            else:
+                raise
+    raise last_exc
+
+
+async def retry_async(
+    fn: Callable[..., Any],
+    *,
+    max_retries: int = 3,
+    base_delay: float = 0.2,
+    max_delay: float = 5.0,
+) -> Any:
+    """
+    Execute `await fn()` with exponential-backoff retries on transient errors.
+    """
+    last_exc: Exception = RuntimeError("unreachable")
+    for attempt in range(max_retries + 1):
+        try:
+            return await fn()
+        except _RETRIABLE_EXCEPTIONS as exc:
+            last_exc = exc
+            if attempt == max_retries:
+                break
+            delay = min(base_delay * (2 ** attempt) + random.uniform(0, 0.1), max_delay)
+            logger.warning(
+                f"Async retry {attempt + 1}/{max_retries} after {type(exc).__name__}: "
+                f"waiting {delay:.2f}s"
+            )
+            await asyncio.sleep(delay)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code >= 500 and attempt < max_retries:
+                last_exc = exc
+                delay = min(base_delay * (2 ** attempt) + random.uniform(0, 0.1), max_delay)
+                logger.warning(
+                    f"Async retry {attempt + 1}/{max_retries} after HTTP {exc.response.status_code}: "
+                    f"waiting {delay:.2f}s"
+                )
+                await asyncio.sleep(delay)
+            else:
+                raise
+    raise last_exc
 
 
 class ProviderRegistry:

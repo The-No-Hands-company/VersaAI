@@ -26,12 +26,21 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from versaai.config import settings
 from versaai.api.provider_registry import get_registry
 from versaai.api.routes import chat, models, health, agents, rag, memory
+from versaai.api.errors import (
+    VersaAPIError,
+    versaai_error_handler,
+    validation_error_handler,
+    generic_error_handler,
+    RequestSizeMiddleware,
+    RateLimitMiddleware,
+)
 
 # ============================================================================
 # Logging
@@ -112,9 +121,16 @@ app = FastAPI(
 
 
 # ============================================================================
-# Middleware
+# Middleware (order matters: outermost first)
 # ============================================================================
 
+# 1. Request size guard (10 MB max body)
+app.add_middleware(RequestSizeMiddleware, max_body_bytes=10 * 1024 * 1024)
+
+# 2. Rate limiting (120 req/min per IP, burst 20)
+app.add_middleware(RateLimitMiddleware, requests_per_minute=120, burst=20)
+
+# 3. CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.server.cors_origins,
@@ -125,24 +141,12 @@ app.add_middleware(
 
 
 # ============================================================================
-# Global exception handler
+# Exception handlers (structured OpenAI-compatible errors)
 # ============================================================================
 
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Catch-all for unhandled exceptions. Returns OpenAI-compatible error."""
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": {
-                "message": f"Internal server error: {type(exc).__name__}",
-                "type": "server_error",
-                "param": None,
-                "code": None,
-            }
-        },
-    )
+app.add_exception_handler(VersaAPIError, versaai_error_handler)
+app.add_exception_handler(RequestValidationError, validation_error_handler)
+app.add_exception_handler(Exception, generic_error_handler)
 
 
 # ============================================================================

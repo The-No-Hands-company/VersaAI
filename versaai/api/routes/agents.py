@@ -17,6 +17,8 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from versaai.api.errors import InvalidRequestError, InferenceError, InferenceTimeoutError
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/agents")
@@ -136,9 +138,9 @@ def _get_or_create_agent(agent_name: str, config: Optional[Dict[str, Any]] = Non
         agent = PlanningSystem(llm_function=llm)
 
     else:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown agent: '{agent_name}'. Available: coding, research, reasoning, planning",
+        raise InvalidRequestError(
+            f"Unknown agent: '{agent_name}'. Available: coding, research, reasoning, planning",
+            param="agent",
         )
 
     _agent_instances[key] = agent
@@ -215,7 +217,7 @@ async def execute_agent(request: AgentExecuteRequest):
         raise
     except Exception as exc:
         logger.error(f"[{request_id}] Agent creation failed: {exc}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Agent initialization error: {exc}")
+        raise InferenceError(f"Agent initialization error: {exc}")
 
     # Streaming mode: return SSE
     if request.stream:
@@ -239,15 +241,12 @@ async def execute_agent(request: AgentExecuteRequest):
 
     except asyncio.TimeoutError:
         logger.error(f"[{request_id}] Agent timed out after {timeout}s")
-        raise HTTPException(
-            status_code=504,
-            detail=f"Agent execution timed out after {timeout}s",
-        )
+        raise InferenceTimeoutError(timeout_seconds=timeout, provider=agent_name)
     except HTTPException:
         raise
     except Exception as exc:
         logger.error(f"[{request_id}] Execution failed: {exc}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Agent execution error: {exc}")
+        raise InferenceError(f"Agent execution error: {exc}")
 
 
 # ============================================================================
@@ -340,7 +339,7 @@ async def _dispatch_agent(
         )
 
     else:
-        raise HTTPException(status_code=400, detail=f"Unknown agent: {agent_name}")
+        raise InvalidRequestError(f"Unknown agent: {agent_name}", param="agent")
 
 
 # ============================================================================

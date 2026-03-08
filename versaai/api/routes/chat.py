@@ -14,6 +14,7 @@ import time
 import uuid
 from typing import AsyncGenerator, Optional
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
@@ -25,11 +26,15 @@ from versaai.api.schemas import (
     ChatCompletionStreamChoice,
     ChoiceMessage,
     DeltaMessage,
-    ErrorDetail,
-    ErrorResponse,
     UsageInfo,
 )
 from versaai.api.provider_registry import get_registry
+from versaai.api.errors import (
+    InvalidModelError,
+    InferenceError,
+    InferenceTimeoutError,
+    ProviderUnavailableError,
+)
 from versaai.memory.persistence import ConversationDB
 
 logger = logging.getLogger(__name__)
@@ -404,12 +409,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         provider, model_name = registry.get_provider_and_model(req.model)
         provider_name, _ = registry.parse_model_id(req.model)
     except ValueError as e:
-        raise HTTPException(
-            status_code=400,
-            detail=ErrorResponse(
-                error=ErrorDetail(message=str(e), type="invalid_request_error")
-            ).model_dump(),
-        )
+        raise InvalidModelError(str(e), param="model")
 
     logger.info(
         f"Chat completion: provider={provider_name} model={model_name} "
@@ -494,14 +494,13 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
 
             return resp
 
+    except httpx.ConnectError:
+        raise ProviderUnavailableError(provider_name)
+    except httpx.TimeoutException:
+        raise InferenceTimeoutError(
+            timeout_seconds=getattr(provider, 'timeout', 120),
+            provider=provider_name,
+        )
     except Exception as e:
         logger.error(f"Chat completion error: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=ErrorResponse(
-                error=ErrorDetail(
-                    message=f"Inference error: {str(e)}",
-                    type="server_error",
-                )
-            ).model_dump(),
-        )
+        raise InferenceError(f"Inference failed: {e}")
