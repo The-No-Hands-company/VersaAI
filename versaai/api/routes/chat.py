@@ -76,15 +76,29 @@ async def _load_history(conversation_id: str) -> list[dict]:
     return [{"role": r["role"], "content": r["content"]} for r in rows]
 
 
-async def _ensure_conversation(conversation_id: str) -> str:
-    """Create the conversation record if it doesn't exist yet."""
+async def _ensure_conversation(conversation_id: str) -> bool:
+    """Create the conversation record if it doesn't exist yet.
+
+    Returns True if the conversation was newly created (needs a title).
+    """
     db = await _get_db()
     existing = await db.get_conversation(conversation_id)
     if not existing:
         await db.create_conversation(
             title="", conversation_id=conversation_id,
         )
-    return conversation_id
+        return True
+    # Existing but no title yet — still needs one
+    return not existing.get("title")
+
+
+async def _set_conversation_title(conversation_id: str, first_message: str):
+    """Auto-generate a conversation title from the first user message."""
+    title = first_message.strip().replace("\n", " ")
+    if len(title) > 60:
+        title = title[:57] + "…"
+    db = await _get_db()
+    await db.update_conversation_title(conversation_id, title)
 
 
 async def _save_message(conversation_id: str, role: str, content: str):
@@ -441,12 +455,18 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     conv_id = req.conversation_id
     if conv_id:
         try:
-            await _ensure_conversation(conv_id)
+            needs_title = await _ensure_conversation(conv_id)
             history = await _load_history(conv_id)
             # Save user messages from this request
+            first_user_text = ""
             for m in req.messages:
                 if m.role == "user" and m.content:
+                    if not first_user_text:
+                        first_user_text = m.content
                     await _save_message(conv_id, "user", m.content)
+            # Auto-title from first user message
+            if needs_title and first_user_text:
+                await _set_conversation_title(conv_id, first_user_text)
         except Exception as exc:
             logger.warning(f"Persistence load failed (non-fatal): {exc}")
             history = []

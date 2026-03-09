@@ -1,6 +1,6 @@
-/** RAG / Knowledge view — ingest documents and query the knowledge base. */
+/** RAG / Knowledge view — ingest documents, query the knowledge base, and browse ingested docs. */
 
-import { ragIngest, ragQuery } from "../api";
+import { ragIngest, ragQuery, ragStats, ragDocuments, type RagStats, type RagDocument } from "../api";
 
 let containerEl: HTMLElement | null = null;
 
@@ -8,6 +8,10 @@ export function renderRag(el: HTMLElement) {
   containerEl = el;
   el.innerHTML = `
     <h1 class="heading">Knowledge Base</h1>
+
+    <div id="rag-stats-bar" class="rag-stats-bar">
+      <span style="color:var(--text-muted)">Loading stats…</span>
+    </div>
 
     <section class="rag-section">
       <h2>Ingest Document</h2>
@@ -24,15 +28,67 @@ export function renderRag(el: HTMLElement) {
       <button id="rag-query-btn" class="btn btn--primary">Search</button>
       <div id="rag-results" class="rag-results"></div>
     </section>
+
+    <section class="rag-section">
+      <h2>Ingested Documents</h2>
+      <div id="rag-doc-list" class="rag-doc-list">
+        <span style="color:var(--text-muted);font-size:13px;">Loading…</span>
+      </div>
+    </section>
   `;
 
   // Ingest
-  const ingestBtn = el.querySelector<HTMLButtonElement>("#rag-ingest-btn")!;
-  ingestBtn.addEventListener("click", handleIngest);
+  el.querySelector<HTMLButtonElement>("#rag-ingest-btn")!
+    .addEventListener("click", handleIngest);
 
   // Query
-  const queryBtn = el.querySelector<HTMLButtonElement>("#rag-query-btn")!;
-  queryBtn.addEventListener("click", handleQuery);
+  el.querySelector<HTMLButtonElement>("#rag-query-btn")!
+    .addEventListener("click", handleQuery);
+
+  // Load stats & documents
+  loadStats();
+  loadDocuments();
+}
+
+// ---------------------------------------------------------------------------
+async function loadStats() {
+  const bar = containerEl?.querySelector<HTMLElement>("#rag-stats-bar");
+  if (!bar) return;
+  try {
+    const s: RagStats = await ragStats();
+    bar.innerHTML = `
+      <div class="rag-stats-bar__item">Documents <span class="rag-stats-bar__value">${s.total_documents ?? 0}</span></div>
+      <div class="rag-stats-bar__item">Chunks <span class="rag-stats-bar__value">${s.total_chunks ?? 0}</span></div>
+      <div class="rag-stats-bar__item">Queries <span class="rag-stats-bar__value">${s.total_queries ?? 0}</span></div>
+    `;
+  } catch {
+    bar.innerHTML = '<span style="color:var(--text-muted);font-size:12px;">Stats unavailable</span>';
+  }
+}
+
+async function loadDocuments() {
+  const listEl = containerEl?.querySelector<HTMLElement>("#rag-doc-list");
+  if (!listEl) return;
+  try {
+    const res = await ragDocuments(50);
+    const docs: RagDocument[] = res.documents ?? [];
+    if (docs.length === 0) {
+      listEl.innerHTML = '<span style="color:var(--text-muted);font-size:13px;">No documents ingested yet.</span>';
+      return;
+    }
+    listEl.innerHTML = docs
+      .map((d) => {
+        const preview = (d.content ?? "").slice(0, 80).replace(/\n/g, " ");
+        return `
+          <div class="rag-doc-row">
+            <span class="rag-doc-row__id">${escapeHtml(d.id?.slice(0, 10) ?? "—")}</span>
+            <span class="rag-doc-row__preview">${escapeHtml(preview || "(no preview)")}</span>
+          </div>`;
+      })
+      .join("");
+  } catch {
+    listEl.innerHTML = '<span style="color:var(--text-muted);font-size:13px;">Could not load documents.</span>';
+  }
 }
 
 async function handleIngest() {
@@ -52,6 +108,9 @@ async function handleIngest() {
     status.textContent = `✓ Ingested — ${JSON.stringify(res)}`;
     status.style.color = "var(--success)";
     input.value = "";
+    // Refresh stats and document list
+    loadStats();
+    loadDocuments();
   } catch (err) {
     status.textContent = `✗ ${err instanceof Error ? err.message : String(err)}`;
     status.style.color = "var(--error)";

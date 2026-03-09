@@ -81,6 +81,7 @@ class AgentInfo(BaseModel):
     description: str
     version: str
     capabilities: List[str]
+    status: str = "active"
 
 
 class AgentListResponse(BaseModel):

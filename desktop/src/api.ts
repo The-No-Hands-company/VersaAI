@@ -177,6 +177,35 @@ export async function deleteConversation(convId: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// RAG stats & documents (direct fetch)
+// ---------------------------------------------------------------------------
+
+export interface RagStats {
+  total_chunks: number;
+  total_documents: number;
+  total_queries: number;
+  [key: string]: unknown;
+}
+
+export interface RagDocument {
+  id: string;
+  content?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export async function ragStats(): Promise<RagStats> {
+  const resp = await fetch(`${API_BASE}/v1/rag/stats`);
+  if (!resp.ok) throw new Error(`RAG stats failed: ${resp.status}`);
+  return resp.json();
+}
+
+export async function ragDocuments(limit = 100, offset = 0): Promise<{ documents: RagDocument[]; total: number }> {
+  const resp = await fetch(`${API_BASE}/v1/rag/documents?limit=${limit}&offset=${offset}`);
+  if (!resp.ok) throw new Error(`RAG documents failed: ${resp.status}`);
+  return resp.json();
+}
+
+// ---------------------------------------------------------------------------
 // Streaming chat (direct fetch for SSE — bypasses Tauri invoke)
 // ---------------------------------------------------------------------------
 

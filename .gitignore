@@ -551,3 +551,8 @@ verify_chat_output.txt
 verify_chat_output_v2.txt
 
 # End of https://www.toptal.com/developers/gitignore/api/c++,cmake,visualstudio,visualstudiocode,windows,linux,macos
+
+# Root-only npm artifacts (not desktop/)
+/package.json
+/package-lock.json
+/node_modules/

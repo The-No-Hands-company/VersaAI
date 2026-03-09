@@ -10,6 +10,14 @@ import {
   type ConversationSummary,
   type SettingsView,
 } from "../api";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
+
+// Configure marked for code blocks
+marked.setOptions({
+  breaks: true,
+  gfm: true,
+});
 
 let messages: ChatMessage[] = [];
 let loading = false;
@@ -214,7 +222,7 @@ async function handleSend(input: HTMLTextAreaElement) {
 function updateStreamingMessage(idx: number) {
   const msgEl = containerEl?.querySelector(`[data-msg-idx="${idx}"] .message__body`);
   if (msgEl) {
-    msgEl.textContent = messages[idx].content;
+    msgEl.innerHTML = renderMarkdown(messages[idx].content);
     // Scroll to bottom
     const messagesEl = containerEl?.querySelector("#chat-messages");
     if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -230,10 +238,12 @@ function renderMessages() {
       (m, i) => `
     <div class="message message--${m.role}" data-msg-idx="${i}">
       <div class="message__avatar">${m.role === "user" ? "U" : "AI"}</div>
-      <div class="message__body">${escapeHtml(m.content)}${
-        loading && m.role === "assistant" && i === messages.length - 1 && !m.content
-          ? '<span class="spinner"></span> Thinking…'
-          : ""
+      <div class="message__body">${
+        m.role === "user"
+          ? escapeHtml(m.content)
+          : loading && i === messages.length - 1 && !m.content
+            ? '<span class="spinner"></span> Thinking…'
+            : renderMarkdown(m.content)
       }</div>
     </div>
   `,
@@ -248,6 +258,12 @@ function updateButtons() {
   const stopBtn = containerEl?.querySelector<HTMLButtonElement>("#chat-stop");
   if (sendBtn) sendBtn.style.display = loading ? "none" : "";
   if (stopBtn) stopBtn.style.display = loading ? "" : "none";
+}
+
+function renderMarkdown(raw: string): string {
+  if (!raw) return "";
+  const html = marked.parse(raw) as string;
+  return DOMPurify.sanitize(html);
 }
 
 function escapeHtml(str: string): string {

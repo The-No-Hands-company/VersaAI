@@ -188,6 +188,17 @@ class ConversationDB:
         await self._conn.commit()
         return cursor.rowcount > 0
 
+    async def update_conversation_title(
+        self, conversation_id: str, title: str,
+    ) -> None:
+        """Set the title of an existing conversation."""
+        await self._ensure_conn()
+        await self._conn.execute(
+            "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?",
+            (title, time.time(), conversation_id),
+        )
+        await self._conn.commit()
+
     # ------------------------------------------------------------------
     # Messages
     # ------------------------------------------------------------------
