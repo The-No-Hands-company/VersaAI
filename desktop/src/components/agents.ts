@@ -3,14 +3,17 @@
 import {
   agentList,
   agentExecuteStream,
+  getSettings,
   type AgentInfo,
   type AgentStreamEvent,
+  type SettingsView,
 } from "../api";
 
 let agents: AgentInfo[] = [];
 let loadError: string | null = null;
 let containerEl: HTMLElement | null = null;
 const runningAborts = new Map<string, AbortController>();
+let runtimeSettings: SettingsView | null = null;
 
 export function renderAgents(el: HTMLElement) {
   containerEl = el;
@@ -22,6 +25,7 @@ export function renderAgents(el: HTMLElement) {
   `;
 
   loadAgents();
+  getSettings().then((s) => { runtimeSettings = s; }).catch(() => {});
 }
 
 async function loadAgents() {
@@ -131,7 +135,7 @@ async function handleExecute(e: Event) {
           resultDiv.textContent = `Error: ${event.data.error ?? "Unknown error"}`;
         }
       },
-      { signal: abort.signal },
+      { signal: abort.signal, model: runtimeSettings?.default_model },
     );
 
     if (!resultDiv.textContent) {

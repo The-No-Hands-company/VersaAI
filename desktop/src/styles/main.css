@@ -472,3 +472,194 @@ body {
     transform: rotate(360deg);
   }
 }
+
+/* -------------------------------------------------------- Danger button */
+.btn--danger {
+  background: var(--error);
+  color: #fff;
+}
+
+.btn--danger:hover {
+  background: #ef4444;
+}
+
+/* ------------------------------------------- Agent card actions layout */
+.agent-card__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: auto;
+}
+
+.agent-task-input {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.agent-task-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.agent-steps {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.agent-step-item {
+  padding: 2px 0;
+}
+
+/* -------------------------------------------------------- Settings view */
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 520px;
+}
+
+.settings-group {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 20px;
+  background: var(--bg-secondary);
+}
+
+.settings-group legend {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--accent);
+  padding: 0 6px;
+}
+
+.settings-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 12px;
+}
+
+.settings-label:first-of-type {
+  margin-top: 8px;
+}
+
+.settings-label--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-input {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-sans);
+}
+
+.settings-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+select.settings-input {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238b8fa3'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+  cursor: pointer;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+}
+
+/* -------------------------------------------------- Provider status rows */
+.providers-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.provider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* --------------------------------------------- Conversation list panel */
+.chat-history-panel {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.chat-history-panel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 4px 6px;
+}
+
+.chat-history-panel__header span {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.conv-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+  transition: background 0.15s;
+}
+
+.conv-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.conv-item--active {
+  background: var(--accent-muted);
+  color: var(--text-primary);
+}
+
+.conv-item__del {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.conv-item__del:hover {
+  color: var(--error);
+  background: rgba(248, 113, 113, 0.1);
+}

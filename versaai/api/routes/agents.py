@@ -352,11 +352,21 @@ def _gc_executions():
 async def _dispatch_agent(
     agent, agent_name: str, request: AgentExecuteRequest,
     cfg: dict, request_id: str, start: float,
+    step_callback=None,
 ) -> AgentExecuteResponse:
-    """Run the appropriate agent method in a thread and return the response."""
+    """Run the appropriate agent method in a thread and return the response.
+
+    If *step_callback* is provided it will be injected into the agent's
+    execution context so intermediate steps are reported in real-time.
+    """
+
+    # Build context dict, injecting the callback when available
+    ctx = dict(request.context or {})
+    if step_callback is not None:
+        ctx["status_callback"] = step_callback
 
     if agent_name == "coding":
-        raw = await asyncio.to_thread(agent.execute, request.task, request.context)
+        raw = await asyncio.to_thread(agent.execute, request.task, ctx)
         return AgentExecuteResponse(
             id=request_id,
             agent=agent_name,
@@ -369,7 +379,7 @@ async def _dispatch_agent(
         )
 
     elif agent_name == "research":
-        raw = await asyncio.to_thread(agent.execute, request.task, request.context)
+        raw = await asyncio.to_thread(agent.execute, request.task, ctx)
         return AgentExecuteResponse(
             id=request_id,
             agent=agent_name,
@@ -383,7 +393,6 @@ async def _dispatch_agent(
         )
 
     elif agent_name == "reasoning":
-        ctx = request.context or {}
         _STRATEGY_ALIASES = {
             "chain_of_thought": "cot", "chain-of-thought": "cot",
             "react": "react",
@@ -413,7 +422,6 @@ async def _dispatch_agent(
         )
 
     elif agent_name == "planning":
-        ctx = request.context or {}
         plan = await asyncio.to_thread(
             agent.create_plan,
             goal=request.task,
@@ -447,7 +455,11 @@ async def _stream_agent_execution(
     cfg: dict, request_id: str, start: float, timeout: float,
 ) -> AsyncGenerator[str, None]:
     """
-    SSE stream for agent execution.
+    SSE stream for agent execution with **real-time** step delivery.
+
+    Uses an asyncio.Queue bridged from the agent's synchronous
+    ``status_callback`` (which runs in a worker thread) so that each
+    step/thought/action is sent to the client as it happens.
 
     Emits events:
         event: step     — intermediate progress / ReAct steps
@@ -458,6 +470,27 @@ async def _stream_agent_execution(
     def _sse(event: str, data: dict) -> str:
         return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
+    # Queue for cross-thread step delivery
+    loop = asyncio.get_running_loop()
+    step_queue: asyncio.Queue = asyncio.Queue()
+    step_counter = 0
+
+    def _step_callback(message: str):
+        """Called from agent thread — pushes a step onto the async queue."""
+        nonlocal step_counter
+        step_counter += 1
+        loop.call_soon_threadsafe(
+            step_queue.put_nowait,
+            {
+                "id": request_id,
+                "agent": agent_name,
+                "type": "step",
+                "step_index": step_counter,
+                "message": message,
+                "elapsed": time.time() - start,
+            },
+        )
+
     # Emit start event
     yield _sse("step", {
         "id": request_id,
@@ -467,26 +500,40 @@ async def _stream_agent_execution(
         "elapsed": 0.0,
     })
 
-    try:
-        result = await asyncio.wait_for(
-            _dispatch_agent(agent, agent_name, request, cfg, request_id, start),
+    # Launch the agent in a background task so we can drain the queue
+    dispatch_task = asyncio.create_task(
+        asyncio.wait_for(
+            _dispatch_agent(
+                agent, agent_name, request, cfg, request_id, start,
+                step_callback=_step_callback,
+            ),
             timeout=timeout,
         )
+    )
 
-        # Emit each step as a separate event
-        for i, step in enumerate(result.steps):
-            yield _sse("step", {
-                "id": request_id,
-                "agent": agent_name,
-                "type": "step",
-                "step_index": i,
-                "step": step if isinstance(step, dict) else str(step),
-                "elapsed": time.time() - start,
-            })
+    # Drain step_queue and yield SSE events until the agent finishes
+    while True:
+        try:
+            item = await asyncio.wait_for(step_queue.get(), timeout=0.25)
+            yield _sse("step", item)
+            continue
+        except asyncio.TimeoutError:
+            pass  # No step arrived in 250ms — check if task is done
 
-        # Emit final result
+        if dispatch_task.done():
+            # Flush any remaining queued steps
+            while not step_queue.empty():
+                try:
+                    item = step_queue.get_nowait()
+                    yield _sse("step", item)
+                except asyncio.QueueEmpty:
+                    break
+            break
+
+    # Handle task result / exception
+    try:
+        result = dispatch_task.result()
         yield _sse("result", result.model_dump())
-
     except asyncio.TimeoutError:
         yield _sse("error", {
             "id": request_id,

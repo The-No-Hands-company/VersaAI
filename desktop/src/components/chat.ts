@@ -1,17 +1,35 @@
 /** Chat view — send messages to LLM via VersaAI backend with real-time streaming. */
 
-import { chatSendStream, type ChatMessage } from "../api";
+import {
+  chatSendStream,
+  getSettings,
+  listConversations,
+  getConversationMessages,
+  deleteConversation,
+  type ChatMessage,
+  type ConversationSummary,
+  type SettingsView,
+} from "../api";
 
 let messages: ChatMessage[] = [];
 let loading = false;
 let containerEl: HTMLElement | null = null;
 let conversationId: string = crypto.randomUUID();
 let abortController: AbortController | null = null;
+let conversations: ConversationSummary[] = [];
+let runtimeSettings: SettingsView | null = null;
 
 export function renderChat(el: HTMLElement) {
   containerEl = el;
   el.innerHTML = `
     <div class="chat-container">
+      <div class="chat-history-panel" id="chat-history">
+        <div class="chat-history-panel__header">
+          <span>Conversations</span>
+          <button class="btn btn--primary" id="new-chat-btn" style="font-size:11px;padding:2px 8px;">+ New</button>
+        </div>
+        <div id="conv-list"></div>
+      </div>
       <div class="chat-messages" id="chat-messages"></div>
       <div class="chat-input-wrapper">
         <textarea
@@ -29,9 +47,11 @@ export function renderChat(el: HTMLElement) {
   const input = el.querySelector<HTMLTextAreaElement>("#chat-input")!;
   const sendBtn = el.querySelector<HTMLButtonElement>("#chat-send")!;
   const stopBtn = el.querySelector<HTMLButtonElement>("#chat-stop")!;
+  const newChatBtn = el.querySelector<HTMLButtonElement>("#new-chat-btn")!;
 
   sendBtn.addEventListener("click", () => handleSend(input));
   stopBtn.addEventListener("click", () => handleStop());
+  newChatBtn.addEventListener("click", () => startNewChat());
 
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -40,13 +60,96 @@ export function renderChat(el: HTMLElement) {
     }
   });
 
-  // Auto-resize textarea
   input.addEventListener("input", () => {
     input.style.height = "auto";
     input.style.height = `${Math.min(input.scrollHeight, 200)}px`;
   });
 
   renderMessages();
+  loadConversations();
+  loadSettings();
+}
+
+async function loadSettings() {
+  try {
+    runtimeSettings = await getSettings();
+  } catch {
+    // Non-fatal — will use backend defaults
+  }
+}
+
+async function loadConversations() {
+  try {
+    conversations = await listConversations(30);
+  } catch {
+    conversations = [];
+  }
+  renderConvList();
+}
+
+function renderConvList() {
+  const list = containerEl?.querySelector("#conv-list");
+  if (!list) return;
+
+  if (conversations.length === 0) {
+    list.innerHTML = '<span style="font-size:11px;color:var(--text-muted);padding:4px 8px;">No history yet</span>';
+    return;
+  }
+
+  list.innerHTML = conversations
+    .map((c) => {
+      const active = c.id === conversationId ? " conv-item--active" : "";
+      const label = c.title || `Chat ${c.id.slice(0, 8)}…`;
+      return `
+        <div class="conv-item${active}" data-conv-id="${escapeHtml(c.id)}">
+          <span>${escapeHtml(label)}</span>
+          <button class="conv-item__del" data-del-id="${escapeHtml(c.id)}" title="Delete">✕</button>
+        </div>`;
+    })
+    .join("");
+
+  list.querySelectorAll(".conv-item").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      // Don't load if clicking the delete button
+      if ((e.target as HTMLElement).classList.contains("conv-item__del")) return;
+      const id = (el as HTMLElement).dataset.convId!;
+      switchConversation(id);
+    });
+  });
+
+  list.querySelectorAll(".conv-item__del").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const id = (btn as HTMLElement).dataset.delId!;
+      try {
+        await deleteConversation(id);
+        if (id === conversationId) startNewChat();
+        await loadConversations();
+      } catch { /* ignore */ }
+    });
+  });
+}
+
+async function switchConversation(id: string) {
+  conversationId = id;
+  messages = [];
+  renderMessages();
+  renderConvList();
+
+  try {
+    const msgs = await getConversationMessages(id);
+    messages = msgs.map((m) => ({ role: m.role as ChatMessage["role"], content: m.content }));
+    renderMessages();
+  } catch {
+    // Conversation may have no messages yet
+  }
+}
+
+function startNewChat() {
+  conversationId = crypto.randomUUID();
+  messages = [];
+  renderMessages();
+  renderConvList();
 }
 
 function handleStop() {
@@ -83,6 +186,9 @@ async function handleSend(input: HTMLTextAreaElement) {
       },
       {
         conversationId,
+        model: runtimeSettings?.default_model,
+        temperature: runtimeSettings?.temperature,
+        maxTokens: runtimeSettings?.max_tokens,
         signal: abortController.signal,
       },
     );
@@ -101,6 +207,7 @@ async function handleSend(input: HTMLTextAreaElement) {
     abortController = null;
     renderMessages();
     updateButtons();
+    loadConversations();
   }
 }
 

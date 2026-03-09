@@ -405,10 +405,29 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     Non-streaming (stream=false):
         Returns JSON ChatCompletionResponse.
     """
+    # Apply runtime settings overrides when request doesn't specify values
+    from versaai.api.routes.settings import _get_effective
+
+    effective_model = req.model
+    if not effective_model:
+        override_model = _get_effective("default_model", None)
+        if override_model:
+            effective_model = override_model
+
+    if req.temperature is None:
+        override_temp = _get_effective("temperature", None)
+        if override_temp is not None:
+            req.temperature = override_temp
+
+    if req.max_tokens is None:
+        override_max = _get_effective("max_tokens", None)
+        if override_max is not None:
+            req.max_tokens = override_max
+
     try:
         registry = get_registry()
-        provider, model_name = registry.get_provider_and_model(req.model)
-        provider_name, _ = registry.parse_model_id(req.model)
+        provider, model_name = registry.get_provider_and_model(effective_model)
+        provider_name, _ = registry.parse_model_id(effective_model)
     except ValueError as e:
         raise InvalidModelError(str(e), param="model")
 

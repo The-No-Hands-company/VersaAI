@@ -53,6 +53,20 @@ export interface ModelInfo {
   quantization?: string;
 }
 
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface ConversationMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  created_at: number;
+}
+
 // ---------------------------------------------------------------------------
 // Non-streaming API (via Tauri commands)
 // ---------------------------------------------------------------------------
@@ -138,6 +152,28 @@ export async function listModels(): Promise<ModelInfo[]> {
   if (!resp.ok) throw new Error(`Models list failed: ${resp.status}`);
   const data = await resp.json();
   return data.models ?? [];
+}
+
+// ---------------------------------------------------------------------------
+// Conversation memory (direct fetch)
+// ---------------------------------------------------------------------------
+
+export async function listConversations(limit = 50): Promise<ConversationSummary[]> {
+  const resp = await fetch(`${API_BASE}/v1/memory/conversations?limit=${limit}`);
+  if (!resp.ok) throw new Error(`List conversations failed: ${resp.status}`);
+  return resp.json();
+}
+
+export async function getConversationMessages(convId: string): Promise<ConversationMessage[]> {
+  const resp = await fetch(`${API_BASE}/v1/memory/conversations/${encodeURIComponent(convId)}/messages`);
+  if (!resp.ok) throw new Error(`Get messages failed: ${resp.status}`);
+  const data = await resp.json();
+  return data.messages ?? data;
+}
+
+export async function deleteConversation(convId: string): Promise<void> {
+  const resp = await fetch(`${API_BASE}/v1/memory/conversations/${encodeURIComponent(convId)}`, { method: "DELETE" });
+  if (!resp.ok) throw new Error(`Delete conversation failed: ${resp.status}`);
 }
 
 // ---------------------------------------------------------------------------
