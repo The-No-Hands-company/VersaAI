@@ -5,6 +5,7 @@ import { renderSidebar, setActiveView } from "./components/sidebar";
 import { renderChat } from "./components/chat";
 import { renderAgents } from "./components/agents";
 import { renderRag } from "./components/rag";
+import { renderSettings } from "./components/settings";
 
 // ---------------------------------------------------------------------------
 // Bootstrap
@@ -36,12 +37,13 @@ document.addEventListener("DOMContentLoaded", async () => {
 // Routing
 // ---------------------------------------------------------------------------
 
-type View = "chat" | "agents" | "rag";
+type View = "chat" | "agents" | "rag" | "settings";
 
 const renderers: Record<View, (el: HTMLElement) => void> = {
   chat: renderChat,
   agents: renderAgents,
   rag: renderRag,
+  settings: renderSettings,
 };
 
 export function navigateTo(view: View) {

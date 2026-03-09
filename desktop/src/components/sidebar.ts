@@ -1,6 +1,6 @@
 /** Sidebar component — navigation between views. */
 
-type View = "chat" | "agents" | "rag";
+type View = "chat" | "agents" | "rag" | "settings";
 
 interface NavItem {
   id: View;
@@ -12,6 +12,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "chat", label: "Chat", icon: "💬" },
   { id: "agents", label: "Agents", icon: "🤖" },
   { id: "rag", label: "Knowledge", icon: "📚" },
+  { id: "settings", label: "Settings", icon: "⚙️" },
 ];
 
 let activeView: View = "chat";

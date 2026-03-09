@@ -9,8 +9,10 @@ Endpoints:
 import asyncio
 import json
 import logging
+import threading
 import time
 import uuid
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -84,6 +86,32 @@ class AgentInfo(BaseModel):
 class AgentListResponse(BaseModel):
     """List of available agents."""
     agents: List[AgentInfo]
+
+
+# ============================================================================
+# Execution tracking
+# ============================================================================
+
+@dataclass
+class ExecutionRecord:
+    """Tracks a running or completed agent execution."""
+    id: str
+    agent: str
+    task: str
+    status: str = "running"  # running, completed, cancelled, error
+    cancelled: threading.Event = field(default_factory=threading.Event)
+    started_at: float = field(default_factory=time.time)
+    completed_at: Optional[float] = None
+    result: Optional[str] = None
+    error: Optional[str] = None
+
+    def elapsed(self) -> float:
+        end = self.completed_at or time.time()
+        return end - self.started_at
+
+
+_executions: Dict[str, ExecutionRecord] = {}
+_EXECUTION_TTL = 600  # Keep completed records for 10 min
 
 
 # ============================================================================
@@ -195,11 +223,20 @@ async def execute_agent(request: AgentExecuteRequest):
 
     If stream=true, returns SSE with intermediate progress events,
     followed by a final result event.
+
+    Returns an execution ID that can be used to poll status or cancel.
     """
     start = time.time()
     request_id = f"agent-{uuid.uuid4().hex[:12]}"
     agent_name = request.agent.lower()
     timeout = request.timeout or 300.0
+
+    # Garbage-collect old execution records
+    _gc_executions()
+
+    # Register execution
+    record = ExecutionRecord(id=request_id, agent=agent_name, task=request.task)
+    _executions[request_id] = record
 
     logger.info(
         f"[{request_id}] Agent={agent_name} Task={request.task[:100]}... "
@@ -237,16 +274,75 @@ async def execute_agent(request: AgentExecuteRequest):
             _dispatch_agent(agent, agent_name, request, cfg, request_id, start),
             timeout=timeout,
         )
+        record.status = "completed"
+        record.completed_at = time.time()
+        record.result = result.result
         return result
 
     except asyncio.TimeoutError:
+        record.status = "error"
+        record.completed_at = time.time()
+        record.error = f"Timed out after {timeout}s"
         logger.error(f"[{request_id}] Agent timed out after {timeout}s")
         raise InferenceTimeoutError(timeout_seconds=timeout, provider=agent_name)
     except HTTPException:
+        record.status = "error"
+        record.completed_at = time.time()
         raise
     except Exception as exc:
+        record.status = "error"
+        record.completed_at = time.time()
+        record.error = str(exc)
         logger.error(f"[{request_id}] Execution failed: {exc}", exc_info=True)
         raise InferenceError(f"Agent execution error: {exc}")
+
+
+@router.get("/executions/{execution_id}")
+async def get_execution_status(execution_id: str):
+    """Poll the status of a running or completed agent execution."""
+    record = _executions.get(execution_id)
+    if not record:
+        raise InvalidRequestError(
+            f"Execution '{execution_id}' not found", param="execution_id",
+        )
+    return {
+        "id": record.id,
+        "agent": record.agent,
+        "task": record.task,
+        "status": record.status,
+        "elapsed": record.elapsed(),
+        "result": record.result,
+        "error": record.error,
+    }
+
+
+@router.post("/executions/{execution_id}/cancel")
+async def cancel_execution(execution_id: str):
+    """Cancel a running agent execution."""
+    record = _executions.get(execution_id)
+    if not record:
+        raise InvalidRequestError(
+            f"Execution '{execution_id}' not found", param="execution_id",
+        )
+    if record.status != "running":
+        return {"id": record.id, "status": record.status, "message": "Not running"}
+
+    record.cancelled.set()
+    record.status = "cancelled"
+    record.completed_at = time.time()
+    logger.info(f"[{execution_id}] Execution cancelled by user")
+    return {"id": record.id, "status": "cancelled", "elapsed": record.elapsed()}
+
+
+def _gc_executions():
+    """Remove execution records older than TTL."""
+    now = time.time()
+    expired = [
+        eid for eid, rec in _executions.items()
+        if rec.completed_at and (now - rec.completed_at) > _EXECUTION_TTL
+    ]
+    for eid in expired:
+        del _executions[eid]
 
 
 # ============================================================================

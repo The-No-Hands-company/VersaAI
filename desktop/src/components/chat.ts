@@ -1,11 +1,12 @@
-/** Chat view — send messages to LLM via VersaAI backend. */
+/** Chat view — send messages to LLM via VersaAI backend with real-time streaming. */
 
-import { chatSend, type ChatMessage } from "../api";
+import { chatSendStream, type ChatMessage } from "../api";
 
 let messages: ChatMessage[] = [];
 let loading = false;
 let containerEl: HTMLElement | null = null;
 let conversationId: string = crypto.randomUUID();
+let abortController: AbortController | null = null;
 
 export function renderChat(el: HTMLElement) {
   containerEl = el;
@@ -20,14 +21,17 @@ export function renderChat(el: HTMLElement) {
           rows="1"
         ></textarea>
         <button id="chat-send" class="btn btn--primary">Send</button>
+        <button id="chat-stop" class="btn btn--danger" style="display:none">Stop</button>
       </div>
     </div>
   `;
 
   const input = el.querySelector<HTMLTextAreaElement>("#chat-input")!;
   const sendBtn = el.querySelector<HTMLButtonElement>("#chat-send")!;
+  const stopBtn = el.querySelector<HTMLButtonElement>("#chat-stop")!;
 
   sendBtn.addEventListener("click", () => handleSend(input));
+  stopBtn.addEventListener("click", () => handleStop());
 
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -45,6 +49,13 @@ export function renderChat(el: HTMLElement) {
   renderMessages();
 }
 
+function handleStop() {
+  if (abortController) {
+    abortController.abort();
+    abortController = null;
+  }
+}
+
 async function handleSend(input: HTMLTextAreaElement) {
   const text = input.value.trim();
   if (!text || loading) return;
@@ -54,24 +65,52 @@ async function handleSend(input: HTMLTextAreaElement) {
   input.style.height = "auto";
   loading = true;
 
+  // Add empty assistant message that will be filled by streaming
+  const assistantIdx = messages.length;
+  messages.push({ role: "assistant", content: "" });
+
   renderMessages();
-  updateSendButton();
+  updateButtons();
+
+  abortController = new AbortController();
 
   try {
-    const resp = await chatSend(messages, undefined, undefined, undefined, conversationId);
-    const reply = resp.choices?.[0]?.message;
-    if (reply) {
-      messages.push(reply);
-    }
+    await chatSendStream(
+      messages.slice(0, assistantIdx),  // Send only up to (not including) the empty assistant msg
+      (chunk: string) => {
+        messages[assistantIdx].content += chunk;
+        updateStreamingMessage(assistantIdx);
+      },
+      {
+        conversationId,
+        signal: abortController.signal,
+      },
+    );
   } catch (err) {
-    messages.push({
-      role: "assistant",
-      content: `⚠ Error: ${err instanceof Error ? err.message : String(err)}`,
-    });
+    if ((err as Error).name === "AbortError") {
+      // User cancelled — keep partial content
+      if (!messages[assistantIdx].content) {
+        messages[assistantIdx].content = "⏹ Generation stopped.";
+      }
+    } else {
+      messages[assistantIdx].content =
+        `⚠ Error: ${err instanceof Error ? err.message : String(err)}`;
+    }
   } finally {
     loading = false;
+    abortController = null;
     renderMessages();
-    updateSendButton();
+    updateButtons();
+  }
+}
+
+function updateStreamingMessage(idx: number) {
+  const msgEl = containerEl?.querySelector(`[data-msg-idx="${idx}"] .message__body`);
+  if (msgEl) {
+    msgEl.textContent = messages[idx].content;
+    // Scroll to bottom
+    const messagesEl = containerEl?.querySelector("#chat-messages");
+    if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 }
 
@@ -81,30 +120,27 @@ function renderMessages() {
 
   messagesEl.innerHTML = messages
     .map(
-      (m) => `
-    <div class="message message--${m.role}">
+      (m, i) => `
+    <div class="message message--${m.role}" data-msg-idx="${i}">
       <div class="message__avatar">${m.role === "user" ? "U" : "AI"}</div>
-      <div class="message__body">${escapeHtml(m.content)}</div>
+      <div class="message__body">${escapeHtml(m.content)}${
+        loading && m.role === "assistant" && i === messages.length - 1 && !m.content
+          ? '<span class="spinner"></span> Thinking…'
+          : ""
+      }</div>
     </div>
   `,
     )
     .join("");
 
-  if (loading) {
-    messagesEl.innerHTML += `
-      <div class="message message--assistant">
-        <div class="message__avatar">AI</div>
-        <div class="message__body"><span class="spinner"></span> Thinking…</div>
-      </div>
-    `;
-  }
-
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-function updateSendButton() {
-  const btn = containerEl?.querySelector<HTMLButtonElement>("#chat-send");
-  if (btn) btn.disabled = loading;
+function updateButtons() {
+  const sendBtn = containerEl?.querySelector<HTMLButtonElement>("#chat-send");
+  const stopBtn = containerEl?.querySelector<HTMLButtonElement>("#chat-stop");
+  if (sendBtn) sendBtn.style.display = loading ? "none" : "";
+  if (stopBtn) stopBtn.style.display = loading ? "" : "none";
 }
 
 function escapeHtml(str: string): string {
