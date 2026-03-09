@@ -49,7 +49,7 @@ class CriticSeverity(Enum):
 @dataclass
 class CriticIssue:
     """An issue found during critique."""
-    
+
     dimension: CriticDimension
     severity: CriticSeverity
     description: str
@@ -57,7 +57,7 @@ class CriticIssue:
     suggestion: Optional[str] = None  # How to fix
     evidence: Optional[str] = None  # Supporting evidence
     confidence: float = 1.0  # Confidence in this issue (0-1)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -74,12 +74,12 @@ class CriticIssue:
 @dataclass
 class DimensionScore:
     """Score for a single critique dimension."""
-    
+
     dimension: CriticDimension
     score: float  # 0.0 (worst) to 1.0 (best)
     issues: List[CriticIssue] = field(default_factory=list)
     reasoning: Optional[str] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -93,7 +93,7 @@ class DimensionScore:
 @dataclass
 class Critique:
     """Complete critique of a RAG output."""
-    
+
     query: str
     answer: str
     retrieved_docs: List[Dict[str, Any]]
@@ -103,19 +103,19 @@ class Critique:
     recommendations: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
-    
+
     def __post_init__(self):
         """Calculate overall score and aggregate issues."""
         if self.dimension_scores:
             self.overall_score = sum(
                 ds.score for ds in self.dimension_scores
             ) / len(self.dimension_scores)
-            
+
             # Aggregate all issues
             self.issues = []
             for ds in self.dimension_scores:
                 self.issues.extend(ds.issues)
-            
+
             # Sort by severity
             severity_order = {
                 CriticSeverity.CRITICAL: 0,
@@ -125,21 +125,21 @@ class Critique:
                 CriticSeverity.INFO: 4
             }
             self.issues.sort(key=lambda x: severity_order[x.severity])
-    
+
     def get_critical_issues(self) -> List[CriticIssue]:
         """Get only critical issues."""
         return [
             issue for issue in self.issues
             if issue.severity == CriticSeverity.CRITICAL
         ]
-    
+
     def is_acceptable(self, min_score: float = 0.7) -> bool:
         """Check if output quality is acceptable."""
         return (
             self.overall_score >= min_score and
             len(self.get_critical_issues()) == 0
         )
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -156,7 +156,7 @@ class Critique:
 @dataclass
 class CriticConfig:
     """Configuration for Critic Agent."""
-    
+
     use_llm: bool = False
     llm_model: Optional[Any] = None
     enabled_dimensions: List[CriticDimension] = field(
@@ -171,7 +171,7 @@ class CriticConfig:
 class CriticAgent:
     """
     Production-grade Critic Agent for RAG quality assessment.
-    
+
     Evaluates:
     - Factual accuracy against retrieved documents
     - Relevance to original query
@@ -181,26 +181,26 @@ class CriticAgent:
     - Hallucination detection
     - Internal consistency
     """
-    
+
     def __init__(self, config: Optional[CriticConfig] = None):
         """
         Initialize Critic Agent.
-        
+
         Args:
             config: Critic configuration
         """
         self.config = config or CriticConfig()
-        
+
         # Initialize critique patterns
         self._init_patterns()
-        
+
         # Statistics
         self.stats = {
             "total_critiques": 0,
             "average_score": 0.0,
             "critical_issues_found": 0
         }
-        
+
         if HAS_CPP_LOGGER:
             CPPLogger.info(
                 f"CriticAgent initialized (LLM: {self.config.use_llm}, "
@@ -212,7 +212,7 @@ class CriticAgent:
                 f"CriticAgent initialized (LLM: {self.config.use_llm}, "
                 f"dimensions: {len(self.config.enabled_dimensions)})"
             )
-    
+
     def _init_patterns(self):
         """Initialize regex patterns for heuristic evaluation."""
         self.patterns = {
@@ -228,7 +228,7 @@ class CriticAgent:
             "question": re.compile(r"\?$"),
             "incomplete": re.compile(r"\.\.\.$|etc\.$"),
         }
-    
+
     def critique(
         self,
         query: str,
@@ -238,13 +238,13 @@ class CriticAgent:
     ) -> Critique:
         """
         Perform comprehensive critique of RAG output.
-        
+
         Args:
             query: Original user query
             answer: Generated answer
             retrieved_docs: Documents used for generation
             metadata: Optional additional metadata
-            
+
         Returns:
             Complete critique with scores and issues
         """
@@ -252,9 +252,9 @@ class CriticAgent:
             CPPLogger.info(f"Critiquing answer for query: {query[:100]}...", "CriticAgent")
         else:
             CPPLogger.info(f"Critiquing answer for query: {query[:100]}...")
-        
+
         dimension_scores = []
-        
+
         # Evaluate each enabled dimension
         for dimension in self.config.enabled_dimensions:
             if dimension == CriticDimension.FACTUALITY:
@@ -273,12 +273,12 @@ class CriticAgent:
                 score = self._evaluate_consistency(answer)
             else:
                 continue
-            
+
             dimension_scores.append(score)
-        
+
         # Generate recommendations
         recommendations = self._generate_recommendations(dimension_scores)
-        
+
         # Create critique
         critique = Critique(
             query=query,
@@ -288,7 +288,7 @@ class CriticAgent:
             recommendations=recommendations,
             metadata=metadata or {}
         )
-        
+
         # Update statistics
         self.stats["total_critiques"] += 1
         self.stats["average_score"] = (
@@ -296,7 +296,7 @@ class CriticAgent:
              critique.overall_score) / self.stats["total_critiques"]
         )
         self.stats["critical_issues_found"] += len(critique.get_critical_issues())
-        
+
         if HAS_CPP_LOGGER:
             CPPLogger.info(
                 f"Critique complete: score={critique.overall_score:.2f}, "
@@ -308,9 +308,9 @@ class CriticAgent:
                 f"Critique complete: score={critique.overall_score:.2f}, "
                 f"issues={len(critique.issues)}"
             )
-        
+
         return critique
-    
+
     def _evaluate_factuality(
         self,
         answer: str,
@@ -318,25 +318,25 @@ class CriticAgent:
     ) -> DimensionScore:
         """Evaluate factual accuracy against retrieved documents."""
         issues = []
-        
+
         # Extract facts from answer (simplified)
         answer_sentences = answer.split('.')
-        
+
         # Check if facts are supported by retrieved documents
         doc_texts = [doc.get("document", "") for doc in retrieved_docs]
         all_doc_text = " ".join(doc_texts).lower()
-        
+
         unsupported_count = 0
         for sentence in answer_sentences:
             sentence = sentence.strip()
             if not sentence:
                 continue
-            
+
             # Simple check: key phrases in sentence should appear in docs
             key_words = [w for w in sentence.lower().split() if len(w) > 4]
             if key_words:
                 support_score = sum(1 for w in key_words if w in all_doc_text) / len(key_words)
-                
+
                 if support_score < 0.3:
                     unsupported_count += 1
                     issues.append(CriticIssue(
@@ -347,32 +347,33 @@ class CriticAgent:
                         suggestion="Verify against source documents or add citation",
                         confidence=0.7
                     ))
-        
+
         # Calculate score
         if len(answer_sentences) > 0:
             score = 1.0 - (unsupported_count / len(answer_sentences))
         else:
             score = 0.5
-        
+
         return DimensionScore(
             dimension=CriticDimension.FACTUALITY,
             score=max(0.0, min(1.0, score)),
             issues=issues,
             reasoning=f"Found {unsupported_count} potentially unsupported statements"
         )
-    
+
     def _evaluate_relevance(self, query: str, answer: str) -> DimensionScore:
         """Evaluate how well answer addresses the query."""
         issues = []
-        
-        # Extract key terms from query
-        query_terms = set(query.lower().split())
-        answer_terms = set(answer.lower().split())
-        
+
+        # Extract key terms, stripping punctuation for accurate matching
+        _strip = str.maketrans("", "", ".,;:!?\"'()[]{}—–-")
+        query_terms = {w.translate(_strip) for w in query.lower().split()} - {""}
+        answer_terms = {w.translate(_strip) for w in answer.lower().split()} - {""}
+
         # Calculate term overlap
         overlap = len(query_terms & answer_terms)
         relevance_score = overlap / len(query_terms) if query_terms else 0.0
-        
+
         # Check if answer addresses query type (what, how, why, etc.)
         query_type = self._extract_query_type(query)
         if query_type and not self._answer_matches_query_type(answer, query_type):
@@ -384,7 +385,7 @@ class CriticAgent:
                 confidence=0.8
             ))
             relevance_score *= 0.7
-        
+
         # Check for off-topic content
         if relevance_score < 0.3:
             issues.append(CriticIssue(
@@ -394,19 +395,19 @@ class CriticAgent:
                 suggestion="Regenerate answer focusing on query intent",
                 confidence=0.9
             ))
-        
+
         return DimensionScore(
             dimension=CriticDimension.RELEVANCE,
             score=max(0.0, min(1.0, relevance_score)),
             issues=issues,
             reasoning=f"Query-answer term overlap: {overlap}/{len(query_terms)}"
         )
-    
+
     def _evaluate_completeness(self, query: str, answer: str) -> DimensionScore:
         """Evaluate if answer is complete."""
         issues = []
         score = 1.0
-        
+
         # Check for incomplete markers
         if self.patterns["incomplete"].search(answer):
             issues.append(CriticIssue(
@@ -417,7 +418,7 @@ class CriticAgent:
                 confidence=0.9
             ))
             score -= 0.2
-        
+
         # Check answer length
         min_length = 50 if self._is_simple_query(query) else 150
         if len(answer.strip()) < min_length:
@@ -429,7 +430,7 @@ class CriticAgent:
                 confidence=0.6
             ))
             score -= 0.3
-        
+
         # Check if answer addresses all parts of multi-part query
         if " and " in query or "," in query:
             query_parts = re.split(r'\s+and\s+|,\s*', query)
@@ -447,21 +448,21 @@ class CriticAgent:
                         confidence=0.7
                     ))
                     score *= parts_addressed / len(query_parts)
-        
+
         return DimensionScore(
             dimension=CriticDimension.COMPLETENESS,
             score=max(0.0, min(1.0, score)),
             issues=issues,
             reasoning=f"Answer length: {len(answer)} chars"
         )
-    
+
     def _evaluate_coherence(self, answer: str) -> DimensionScore:
         """Evaluate answer coherence and flow."""
         issues = []
         score = 1.0
-        
+
         sentences = [s.strip() for s in answer.split('.') if s.strip()]
-        
+
         # Check for very short or very long sentences
         for i, sentence in enumerate(sentences):
             if len(sentence) < 10:
@@ -483,7 +484,7 @@ class CriticAgent:
                     confidence=0.6
                 ))
                 score -= 0.05
-        
+
         # Check for discourse markers (however, therefore, etc.)
         discourse_markers = ["however", "therefore", "furthermore", "moreover", "additionally"]
         has_markers = any(marker in answer.lower() for marker in discourse_markers)
@@ -495,14 +496,14 @@ class CriticAgent:
                 suggestion="Consider adding transitions between ideas",
                 confidence=0.4
             ))
-        
+
         return DimensionScore(
             dimension=CriticDimension.COHERENCE,
             score=max(0.0, min(1.0, score)),
             issues=issues,
             reasoning=f"Analyzed {len(sentences)} sentences"
         )
-    
+
     def _evaluate_citations(
         self,
         answer: str,
@@ -510,7 +511,7 @@ class CriticAgent:
     ) -> DimensionScore:
         """Evaluate quality of citations."""
         issues = []
-        
+
         if not self.config.check_citations:
             return DimensionScore(
                 dimension=CriticDimension.CITATION,
@@ -518,12 +519,12 @@ class CriticAgent:
                 issues=[],
                 reasoning="Citation checking disabled"
             )
-        
+
         # Check for citation markers
         citations = self.patterns["citation"].findall(answer)
-        
+
         score = 1.0
-        
+
         if len(retrieved_docs) > 0 and len(citations) == 0:
             issues.append(CriticIssue(
                 dimension=CriticDimension.CITATION,
@@ -533,7 +534,7 @@ class CriticAgent:
                 confidence=0.8
             ))
             score = 0.5
-        
+
         # Check for citation-document mismatch
         # Extract citation numbers
         citation_numbers = re.findall(r'\[(\d+)\]|\((\d+)\)', answer)
@@ -541,7 +542,7 @@ class CriticAgent:
             (int(n[0] or n[1]) for n in citation_numbers),
             default=0
         )
-        
+
         if max_citation > len(retrieved_docs):
             issues.append(CriticIssue(
                 dimension=CriticDimension.CITATION,
@@ -551,14 +552,14 @@ class CriticAgent:
                 confidence=1.0
             ))
             score = 0.3
-        
+
         return DimensionScore(
             dimension=CriticDimension.CITATION,
             score=score,
             issues=issues,
             reasoning=f"Found {len(citations)} citations, {len(retrieved_docs)} documents"
         )
-    
+
     def _evaluate_hallucination(
         self,
         answer: str,
@@ -566,7 +567,7 @@ class CriticAgent:
     ) -> DimensionScore:
         """Detect potential hallucinations."""
         issues = []
-        
+
         if not self.config.check_hallucinations:
             return DimensionScore(
                 dimension=CriticDimension.HALLUCINATION,
@@ -574,9 +575,9 @@ class CriticAgent:
                 issues=[],
                 reasoning="Hallucination checking disabled"
             )
-        
+
         score = 1.0
-        
+
         # Check for overly definitive statements
         definitive_matches = self.patterns["definitive"].findall(answer)
         if len(definitive_matches) > 3:
@@ -589,13 +590,13 @@ class CriticAgent:
                 confidence=0.6
             ))
             score -= 0.2
-        
+
         # Check for specific numbers/dates not in retrieved docs
         numbers = re.findall(r'\b\d{4}\b|\b\d+\.\d+\b|\b\d+%\b', answer)
         if numbers:
             doc_texts = " ".join([doc.get("document", "") for doc in retrieved_docs])
             unsupported_numbers = [n for n in numbers if n not in doc_texts]
-            
+
             if len(unsupported_numbers) > 0:
                 issues.append(CriticIssue(
                     dimension=CriticDimension.HALLUCINATION,
@@ -606,21 +607,21 @@ class CriticAgent:
                     confidence=0.7
                 ))
                 score -= 0.3
-        
+
         return DimensionScore(
             dimension=CriticDimension.HALLUCINATION,
             score=max(0.0, min(1.0, score)),
             issues=issues,
             reasoning=f"Checked {len(numbers)} numerical claims"
         )
-    
+
     def _evaluate_consistency(self, answer: str) -> DimensionScore:
         """Evaluate internal consistency."""
         issues = []
         score = 1.0
-        
+
         sentences = [s.strip() for s in answer.split('.') if s.strip()]
-        
+
         # Check for contradictory statements (simple heuristic)
         contradiction_pairs = [
             ("yes", "no"),
@@ -628,7 +629,7 @@ class CriticAgent:
             ("increase", "decrease"),
             ("true", "false")
         ]
-        
+
         answer_lower = answer.lower()
         for word1, word2 in contradiction_pairs:
             if word1 in answer_lower and word2 in answer_lower:
@@ -641,21 +642,21 @@ class CriticAgent:
                     confidence=0.5
                 ))
                 score -= 0.1
-        
+
         return DimensionScore(
             dimension=CriticDimension.CONSISTENCY,
             score=max(0.0, min(1.0, score)),
             issues=issues,
             reasoning="Checked for common contradiction patterns"
         )
-    
+
     def _generate_recommendations(
         self,
         dimension_scores: List[DimensionScore]
     ) -> List[str]:
         """Generate actionable recommendations."""
         recommendations = []
-        
+
         # Priority recommendations based on critical issues
         for ds in dimension_scores:
             critical_issues = [i for i in ds.issues if i.severity == CriticSeverity.CRITICAL]
@@ -664,7 +665,7 @@ class CriticAgent:
                     f"CRITICAL: Fix {ds.dimension.value} issues - "
                     f"{critical_issues[0].description}"
                 )
-        
+
         # Recommendations based on low scores
         low_scores = [ds for ds in dimension_scores if ds.score < 0.5]
         for ds in low_scores:
@@ -672,7 +673,7 @@ class CriticAgent:
                 f"Improve {ds.dimension.value} (score: {ds.score:.2f}) - "
                 f"{ds.reasoning}"
             )
-        
+
         # General recommendations
         if not recommendations:
             high_score_dims = [ds for ds in dimension_scores if ds.score >= 0.8]
@@ -681,9 +682,9 @@ class CriticAgent:
                     "Good quality overall. Minor improvements possible in: " +
                     ", ".join([ds.dimension.value for ds in dimension_scores if ds.score < 0.8])
                 )
-        
+
         return recommendations[:5]  # Top 5 recommendations
-    
+
     def _extract_query_type(self, query: str) -> Optional[str]:
         """Extract query type (what, how, why, etc.)."""
         query_lower = query.lower()
@@ -691,11 +692,11 @@ class CriticAgent:
             if query_lower.startswith(qtype):
                 return qtype
         return None
-    
+
     def _answer_matches_query_type(self, answer: str, query_type: str) -> bool:
         """Check if answer matches query type."""
         answer_lower = answer.lower()
-        
+
         # Simple heuristics for query type matching
         if query_type == "when" and not re.search(r'\b\d{4}\b|today|yesterday|ago', answer_lower):
             return False
@@ -703,18 +704,18 @@ class CriticAgent:
             return False
         if query_type == "how" and not re.search(r'\bby\s+|through\s+|using\s+', answer_lower):
             return False
-        
+
         return True
-    
+
     def _is_simple_query(self, query: str) -> bool:
         """Check if query is simple (short answer expected)."""
         simple_indicators = ["what is", "who is", "when was", "where is"]
         return any(query.lower().startswith(ind) for ind in simple_indicators)
-    
+
     def get_stats(self) -> Dict[str, Any]:
         """Get critic statistics."""
         return self.stats.copy()
-    
+
     def reset_stats(self):
         """Reset statistics."""
         self.stats = {
