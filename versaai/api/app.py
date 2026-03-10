@@ -32,7 +32,7 @@ from fastapi.responses import JSONResponse
 
 from versaai.config import settings
 from versaai.api.provider_registry import get_registry
-from versaai.api.routes import chat, models, health, agents, rag, memory, profiles, generation
+from versaai.api.routes import chat, models, health, agents, rag, memory, profiles, generation, safety
 from versaai.api.routes import settings as settings_routes
 from versaai.api.errors import (
     VersaAPIError,
@@ -42,6 +42,8 @@ from versaai.api.errors import (
     RequestSizeMiddleware,
     RateLimitMiddleware,
 )
+from versaai.safety.middleware import SafetyMiddleware
+from versaai.safety.guardrails import GuardrailConfig, get_guardrail_engine
 
 # ============================================================================
 # Logging
@@ -78,6 +80,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info(f"VersaAI API v{settings.version} starting...")
     logger.info(f"  Default provider: {settings.models.default_provider}")
     logger.info(f"  Debug mode: {settings.debug}")
+
+    # Initialize safety guardrail engine from config
+    sc = settings.safety
+    get_guardrail_engine(GuardrailConfig(
+        enabled=sc.enabled,
+        max_input_length=sc.max_input_length,
+        detect_injection=sc.detect_injection,
+        classify_input=sc.classify_input,
+        classify_output=sc.classify_output,
+        detect_pii_input=sc.detect_pii_input,
+        redact_pii_input=sc.redact_pii_input,
+        scrub_pii_output=sc.scrub_pii_output,
+        run_domain_guards=sc.run_domain_guards,
+        medical_mode=sc.medical_mode,
+        financial_mode=sc.financial_mode,
+        legal_mode=sc.legal_mode,
+        injection_score_threshold=sc.injection_score_threshold,
+        audit_enabled=sc.audit_enabled,
+        audit_dir=sc.audit_dir,
+    ))
+    logger.info(f"  Safety guardrails: {'enabled' if sc.enabled else 'DISABLED'}")
 
     registry = get_registry()
     provider_status = registry.check_providers()
@@ -125,6 +148,9 @@ app = FastAPI(
 # Middleware (order matters: outermost first)
 # ============================================================================
 
+# 0. Safety content filter (must be outermost to screen all traffic)
+app.add_middleware(SafetyMiddleware)
+
 # 1. Request size guard (10 MB max body)
 app.add_middleware(RequestSizeMiddleware, max_body_bytes=10 * 1024 * 1024)
 
@@ -163,6 +189,7 @@ app.include_router(memory.router, tags=["Memory"])
 app.include_router(settings_routes.router, tags=["Settings"])
 app.include_router(profiles.router, tags=["Profiles"])
 app.include_router(generation.router, tags=["Generation"])
+app.include_router(safety.router, tags=["Safety"])
 
 
 # ============================================================================

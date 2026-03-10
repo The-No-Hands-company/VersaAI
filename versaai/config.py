@@ -170,6 +170,25 @@ class GenerationConfig(BaseModel):
     )
 
 
+class SafetyConfig(BaseModel):
+    """Safety & content filtering configuration (Phase 6)."""
+    enabled: bool = True
+    max_input_length: int = 100_000
+    detect_injection: bool = True
+    classify_input: bool = True
+    classify_output: bool = True
+    detect_pii_input: bool = True
+    redact_pii_input: bool = False
+    scrub_pii_output: bool = True
+    run_domain_guards: bool = True
+    medical_mode: str = "warn"    # "warn" | "block"
+    financial_mode: str = "warn"
+    legal_mode: str = "warn"
+    injection_score_threshold: float = 0.5
+    audit_enabled: bool = True
+    audit_dir: Optional[str] = None
+
+
 # ============================================================================
 # Main Settings
 # ============================================================================
@@ -206,6 +225,7 @@ class Settings(BaseSettings):
     rag: RAGConfig = RAGConfig()
     memory: MemoryConfig = MemoryConfig()
     generation: GenerationConfig = GenerationConfig()
+    safety: SafetyConfig = SafetyConfig()
 
     model_config = {
         "env_prefix": "VERSAAI_",
