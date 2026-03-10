@@ -218,6 +218,52 @@ class ProviderRegistry:
                 f"Supported: ollama, llamacpp. Model ID: '{model_id}'"
             )
 
+    def get_fallback_chain(self, model_id: str) -> List[Tuple[str, Any, str]]:
+        """
+        Build a ranked list of (provider_name, provider_instance, model_name)
+        to try for the given model_id.
+
+        The primary provider/model comes first, followed by all other enabled
+        providers using their default models.
+
+        Returns:
+            List of (provider_name, provider_instance, model_name) tuples.
+            The primary target is always first; fallbacks are appended in
+            priority order.
+        """
+        primary_provider, primary_model = self.parse_model_id(model_id)
+        chain: List[Tuple[str, Any, str]] = []
+        seen_providers: set[str] = set()
+
+        # Primary
+        try:
+            provider, model_name = self.get_provider_and_model(model_id)
+            chain.append((primary_provider, provider, model_name))
+            seen_providers.add(primary_provider)
+        except ValueError:
+            pass
+
+        # Fallbacks: other enabled providers with their default models
+        fallback_order = [
+            ("ollama", lambda: self.ollama, settings.models.ollama),
+            ("llamacpp", lambda: self.llamacpp, settings.models.llamacpp),
+        ]
+
+        for name, get_instance, cfg in fallback_order:
+            if name in seen_providers:
+                continue
+            if not cfg.enabled:
+                continue
+            try:
+                instance = get_instance()
+                default_model = getattr(cfg, "default_model", "default")
+                chain.append((name, instance, default_model))
+                seen_providers.add(name)
+            except Exception as exc:
+                logger.debug(f"Skipping fallback {name}: {exc}")
+
+        return chain
+
     # ------------------------------------------------------------------
     # Health / discovery
     # ------------------------------------------------------------------

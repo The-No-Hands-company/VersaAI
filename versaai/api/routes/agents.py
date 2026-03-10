@@ -146,25 +146,14 @@ def _get_or_create_agent(agent_name: str, config: Optional[Dict[str, Any]] = Non
         agent.initialize(cfg)
 
     elif key == "reasoning":
-        from versaai.agents.reasoning import ReasoningEngine
-        from versaai.agents.llm_client import LLMClient
-        llm = LLMClient(
-            model=cfg.get("model"),
-            temperature=cfg.get("temperature", 0.7),
-        )
-        agent = ReasoningEngine(
-            llm_function=llm,
-            strategy="cot",  # default; callers override per-request
-        )
+        from versaai.agents.reasoning_agent import ReasoningAgent
+        agent = ReasoningAgent()
+        agent.initialize(cfg)
 
     elif key == "planning":
-        from versaai.agents.planning import PlanningSystem
-        from versaai.agents.llm_client import LLMClient
-        llm = LLMClient(
-            model=cfg.get("model"),
-            temperature=cfg.get("temperature", 0.4),
-        )
-        agent = PlanningSystem(llm_function=llm)
+        from versaai.agents.planning_agent import PlanningAgent
+        agent = PlanningAgent()
+        agent.initialize(cfg)
 
     else:
         raise InvalidRequestError(
@@ -404,42 +393,39 @@ async def _dispatch_agent(
         }
         raw_strat = cfg.get("strategy")
         strategy = _STRATEGY_ALIASES.get(raw_strat, raw_strat) if raw_strat else None
-        result = await asyncio.to_thread(
-            agent.reason,
-            task=request.task,
-            context=ctx,
-            strategy=strategy,
-        )
+        if strategy:
+            ctx["strategy"] = strategy
+        raw = await asyncio.to_thread(agent.execute, request.task, ctx)
         return AgentExecuteResponse(
             id=request_id,
             agent=agent_name,
             task=request.task,
-            result=result.answer,
-            steps=[s.to_dict() for s in result.steps],
-            confidence=result.confidence,
-            metadata=result.metadata,
-            execution_time=result.execution_time,
+            result=raw.get("result", ""),
+            steps=raw.get("steps", []),
+            confidence=raw.get("confidence"),
+            metadata={
+                "strategy_used": raw.get("strategy_used"),
+                "verified": raw.get("verified"),
+            },
+            execution_time=raw.get("execution_time", time.time() - start),
             status="success",
         )
 
     elif agent_name == "planning":
-        plan = await asyncio.to_thread(
-            agent.create_plan,
-            goal=request.task,
-            context=ctx,
-            constraints=cfg.get("constraints"),
-        )
+        ctx["action"] = cfg.get("action", "plan")
+        if cfg.get("constraints"):
+            ctx["constraints"] = cfg["constraints"]
+        if cfg.get("plan_id"):
+            ctx["plan_id"] = cfg["plan_id"]
+        raw = await asyncio.to_thread(agent.execute, request.task, ctx)
         return AgentExecuteResponse(
             id=request_id,
             agent=agent_name,
             task=request.task,
-            result=f"Plan created with {len(plan.tasks)} tasks",
-            steps=[t.to_dict() for t in plan.tasks],
-            metadata={
-                "plan_id": plan.plan_id,
-                "total_estimated_duration": plan.total_estimated_duration,
-            },
-            execution_time=time.time() - start,
+            result=raw.get("result", ""),
+            steps=raw.get("steps", []),
+            metadata=raw.get("metadata", {}),
+            execution_time=raw.get("execution_time", time.time() - start),
             status="success",
         )
 

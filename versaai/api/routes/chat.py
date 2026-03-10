@@ -398,6 +398,90 @@ async def _stream_llamacpp_core(
 
 
 # ============================================================================
+# Fallback helper
+# ============================================================================
+
+_FALLBACK_EXCEPTIONS = (
+    httpx.ConnectError,
+    httpx.RemoteProtocolError,
+    httpx.ReadTimeout,
+    httpx.ConnectTimeout,
+    ConnectionError,
+    OSError,
+)
+
+
+async def _non_streaming_with_fallback(
+    registry,
+    model_id: str,
+    req: ChatCompletionRequest,
+    messages: list[dict],
+) -> ChatCompletionResponse:
+    """
+    Try the primary provider; on connection/timeout failure, iterate the
+    fallback chain from ProviderRegistry.
+
+    Only transient connectivity errors trigger fallback. HTTP 4xx, inference
+    errors, and other exceptions propagate immediately.
+    """
+    chain = registry.get_fallback_chain(model_id)
+    if not chain:
+        raise ProviderUnavailableError("no providers available")
+
+    last_exc: Exception = RuntimeError("unreachable")
+
+    for idx, (prov_name, provider, model_name) in enumerate(chain):
+        is_fallback = idx > 0
+        if is_fallback:
+            logger.warning(
+                f"Falling back to {prov_name}/{model_name} "
+                f"after {type(last_exc).__name__}"
+            )
+
+        try:
+            if prov_name == "ollama":
+                resp = await asyncio.to_thread(
+                    _handle_ollama_sync_with_messages,
+                    provider, model_name, req, messages,
+                )
+            elif prov_name == "llamacpp":
+                resp = await asyncio.to_thread(
+                    _handle_llamacpp_sync_with_messages,
+                    provider, model_name, req, messages,
+                )
+            else:
+                continue  # skip unknown providers
+
+            if is_fallback:
+                logger.info(f"Fallback to {prov_name}/{model_name} succeeded")
+            return resp
+
+        except _FALLBACK_EXCEPTIONS as exc:
+            last_exc = exc
+            logger.warning(
+                f"Provider {prov_name}/{model_name} unreachable: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            continue
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code >= 500:
+                last_exc = exc
+                logger.warning(
+                    f"Provider {prov_name}/{model_name} returned "
+                    f"HTTP {exc.response.status_code}"
+                )
+                continue
+            raise
+        except Exception:
+            raise
+
+    # All providers exhausted
+    raise ProviderUnavailableError(
+        f"all providers failed (last: {type(last_exc).__name__}: {last_exc})"
+    )
+
+
+# ============================================================================
 # Endpoint
 # ============================================================================
 
@@ -515,17 +599,10 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                 },
             )
         else:
-            # Non-streaming response — run sync handlers off the event loop
-            if provider_name == "ollama":
-                resp = await asyncio.to_thread(
-                    _handle_ollama_sync_with_messages, provider, model_name, req, all_messages,
-                )
-            elif provider_name == "llamacpp":
-                resp = await asyncio.to_thread(
-                    _handle_llamacpp_sync_with_messages, provider, model_name, req, all_messages,
-                )
-            else:
-                raise HTTPException(status_code=400, detail="Unsupported provider")
+            # Non-streaming response with fallback chain
+            resp = await _non_streaming_with_fallback(
+                registry, effective_model, req, all_messages,
+            )
 
             # Save assistant reply to persistence
             if conv_id:

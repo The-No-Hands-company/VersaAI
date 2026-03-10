@@ -14,7 +14,9 @@ from versaai.agents.agent_base import AgentBase, AgentMetadata
 from versaai.agents.coding_agent import CodingAgent
 from versaai.agents.research_agent import ResearchAgent
 from versaai.agents.reasoning import ReasoningEngine, ReasoningResult, ReasoningStep
+from versaai.agents.reasoning_agent import ReasoningAgent
 from versaai.agents.planning import PlanningSystem, ExecutionPlan, Task
+from versaai.agents.planning_agent import PlanningAgent
 from versaai.agents.llm_client import LLMClient
 
 __all__ = [
@@ -25,8 +27,10 @@ __all__ = [
     "ReasoningEngine",
     "ReasoningResult",
     "ReasoningStep",
+    "ReasoningAgent",
     "PlanningSystem",
     "ExecutionPlan",
     "Task",
+    "PlanningAgent",
     "LLMClient",
 ]
