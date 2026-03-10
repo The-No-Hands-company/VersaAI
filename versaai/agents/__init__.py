@@ -17,6 +17,7 @@ from versaai.agents.reasoning import ReasoningEngine, ReasoningResult, Reasoning
 from versaai.agents.reasoning_agent import ReasoningAgent
 from versaai.agents.planning import PlanningSystem, ExecutionPlan, Task
 from versaai.agents.planning_agent import PlanningAgent
+from versaai.agents.orchestrator import OrchestratorAgent
 from versaai.agents.llm_client import LLMClient
 
 __all__ = [
@@ -32,5 +33,6 @@ __all__ = [
     "ExecutionPlan",
     "Task",
     "PlanningAgent",
+    "OrchestratorAgent",
     "LLMClient",
 ]

@@ -33,7 +33,7 @@ router = APIRouter(prefix="/v1/agents")
 class AgentExecuteRequest(BaseModel):
     """Request to execute a task on an agent."""
     agent: str = Field(
-        description="Agent name: 'coding', 'research', 'reasoning', 'planning'"
+        description="Agent name: 'coding', 'research', 'reasoning', 'planning', 'orchestrator'"
     )
     task: str = Field(
         description="The task to execute (natural language)"
@@ -155,9 +155,14 @@ def _get_or_create_agent(agent_name: str, config: Optional[Dict[str, Any]] = Non
         agent = PlanningAgent()
         agent.initialize(cfg)
 
+    elif key == "orchestrator":
+        from versaai.agents.orchestrator import OrchestratorAgent
+        agent = OrchestratorAgent()
+        agent.initialize(cfg)
+
     else:
         raise InvalidRequestError(
-            f"Unknown agent: '{agent_name}'. Available: coding, research, reasoning, planning",
+            f"Unknown agent: '{agent_name}'. Available: coding, research, reasoning, planning, orchestrator",
             param="agent",
         )
 
@@ -193,6 +198,12 @@ AGENT_INFO = [
         description="LLM-powered goal decomposition and task planning",
         version="2.0.0",
         capabilities=["goal_decomposition", "dependency_resolution", "execution_scheduling"],
+    ),
+    AgentInfo(
+        name="orchestrator",
+        description="Meta-agent that decomposes goals and coordinates specialist agents",
+        version="1.0.0",
+        capabilities=["goal_decomposition", "agent_coordination", "parallel_execution", "result_synthesis"],
     ),
 ]
 
@@ -417,6 +428,23 @@ async def _dispatch_agent(
             ctx["constraints"] = cfg["constraints"]
         if cfg.get("plan_id"):
             ctx["plan_id"] = cfg["plan_id"]
+        raw = await asyncio.to_thread(agent.execute, request.task, ctx)
+        return AgentExecuteResponse(
+            id=request_id,
+            agent=agent_name,
+            task=request.task,
+            result=raw.get("result", ""),
+            steps=raw.get("steps", []),
+            metadata=raw.get("metadata", {}),
+            execution_time=raw.get("execution_time", time.time() - start),
+            status="success",
+        )
+
+    elif agent_name == "orchestrator":
+        if cfg.get("strategy"):
+            ctx["strategy"] = cfg["strategy"]
+        if cfg.get("max_subtasks"):
+            ctx["max_subtasks"] = cfg["max_subtasks"]
         raw = await asyncio.to_thread(agent.execute, request.task, ctx)
         return AgentExecuteResponse(
             id=request_id,
