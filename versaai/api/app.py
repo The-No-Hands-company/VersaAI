@@ -32,7 +32,7 @@ from fastapi.responses import JSONResponse
 
 from versaai.config import settings
 from versaai.api.provider_registry import get_registry
-from versaai.api.routes import chat, models, health, agents, rag, memory, profiles
+from versaai.api.routes import chat, models, health, agents, rag, memory, profiles, generation
 from versaai.api.routes import settings as settings_routes
 from versaai.api.errors import (
     VersaAPIError,
@@ -162,6 +162,7 @@ app.include_router(rag.router, tags=["RAG"])
 app.include_router(memory.router, tags=["Memory"])
 app.include_router(settings_routes.router, tags=["Settings"])
 app.include_router(profiles.router, tags=["Profiles"])
+app.include_router(generation.router, tags=["Generation"])
 
 
 # ============================================================================

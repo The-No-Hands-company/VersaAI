@@ -118,6 +118,58 @@ class MemoryConfig(BaseModel):
     auto_save: bool = True
 
 
+class ImageGenProviderConfig(BaseModel):
+    """Configuration for an image generation provider."""
+    enabled: bool = True
+    base_url: str = "http://localhost:7860"
+    api_key: Optional[str] = None
+    default_model: Optional[str] = None
+    timeout: int = 120
+
+
+class VideoGenProviderConfig(BaseModel):
+    """Configuration for a video generation provider."""
+    enabled: bool = True
+    base_url: str = "http://localhost:8188"
+    timeout: int = 300
+
+
+class Model3DGenProviderConfig(BaseModel):
+    """Configuration for a 3D model generation provider."""
+    enabled: bool = True
+    base_url: str = "http://localhost:8090"
+    api_key: Optional[str] = None
+    timeout: int = 300
+
+
+class GenerationConfig(BaseModel):
+    """Generative media pipeline configuration."""
+    image_provider: str = "stable_diffusion"
+    video_provider: str = "stable_video"
+    model_3d_provider: str = "triposr"
+
+    stable_diffusion: ImageGenProviderConfig = ImageGenProviderConfig(
+        base_url="http://localhost:7860",
+    )
+    comfyui: ImageGenProviderConfig = ImageGenProviderConfig(
+        base_url="http://localhost:8188",
+    )
+    dalle: ImageGenProviderConfig = ImageGenProviderConfig(
+        base_url="https://api.openai.com/v1",
+        enabled=False,
+    )
+    stable_video: VideoGenProviderConfig = VideoGenProviderConfig(
+        base_url="http://localhost:8188",
+    )
+    triposr: Model3DGenProviderConfig = Model3DGenProviderConfig(
+        base_url="http://localhost:8090",
+    )
+    meshy: Model3DGenProviderConfig = Model3DGenProviderConfig(
+        base_url="https://api.meshy.ai/v2",
+        enabled=False,
+    )
+
+
 # ============================================================================
 # Main Settings
 # ============================================================================
@@ -153,6 +205,7 @@ class Settings(BaseSettings):
     server: ServerConfig = ServerConfig()
     rag: RAGConfig = RAGConfig()
     memory: MemoryConfig = MemoryConfig()
+    generation: GenerationConfig = GenerationConfig()
 
     model_config = {
         "env_prefix": "VERSAAI_",

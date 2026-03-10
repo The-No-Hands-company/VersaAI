@@ -290,6 +290,193 @@ class CodeToTextProcessor(ModalityProcessor):
         )
 
 
+class TextToImageProcessor(ModalityProcessor):
+    """Text-to-image generation via GenerationManager."""
+
+    def capability(self) -> ProcessorCapability:
+        return ProcessorCapability(
+            input_modality=Modality.TEXT,
+            output_modality=Modality.IMAGE,
+            name="text_to_image",
+            description="Generate images from text prompts",
+            max_input_bytes=10 * 1024,  # 10KB text prompt max
+        )
+
+    def process(
+        self, payload: ModalityPayload, params: Optional[Dict[str, Any]] = None
+    ) -> ModalityPayload:
+        import asyncio
+        from versaai.generation.manager import GenerationManager
+
+        cfg = params or {}
+        manager = GenerationManager(cfg.get("generation_config", {}))
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                result = pool.submit(
+                    asyncio.run,
+                    manager.generate_image(
+                        prompt=payload.text,
+                        width=cfg.get("width", 512),
+                        height=cfg.get("height", 512),
+                        num_inference_steps=cfg.get("steps", 30),
+                        guidance_scale=cfg.get("guidance_scale", 7.5),
+                        negative_prompt=cfg.get("negative_prompt"),
+                    ),
+                ).result()
+        else:
+            result = asyncio.run(
+                manager.generate_image(
+                    prompt=payload.text,
+                    width=cfg.get("width", 512),
+                    height=cfg.get("height", 512),
+                    num_inference_steps=cfg.get("steps", 30),
+                    guidance_scale=cfg.get("guidance_scale", 7.5),
+                    negative_prompt=cfg.get("negative_prompt"),
+                )
+            )
+
+        return ModalityPayload(
+            modality=Modality.IMAGE,
+            data=result.data,
+            mime_type=result.mime_type,
+            encoding="base64",
+            metadata={
+                "processor": "text_to_image",
+                "provider": result.provider_name,
+                "model": result.model_name,
+                "generation_time": result.generation_time,
+                "seed": result.seed_used,
+            },
+        )
+
+
+class TextToVideoProcessor(ModalityProcessor):
+    """Text-to-video generation via GenerationManager."""
+
+    def capability(self) -> ProcessorCapability:
+        return ProcessorCapability(
+            input_modality=Modality.TEXT,
+            output_modality=Modality.VIDEO,
+            name="text_to_video",
+            description="Generate videos from text prompts",
+            max_input_bytes=10 * 1024,
+        )
+
+    def process(
+        self, payload: ModalityPayload, params: Optional[Dict[str, Any]] = None
+    ) -> ModalityPayload:
+        import asyncio
+        from versaai.generation.manager import GenerationManager
+
+        cfg = params or {}
+        manager = GenerationManager(cfg.get("generation_config", {}))
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                result = pool.submit(
+                    asyncio.run,
+                    manager.generate_video(
+                        prompt=payload.text,
+                        duration=cfg.get("duration", 4.0),
+                        fps=cfg.get("fps", 8),
+                        motion_strength=cfg.get("motion_strength", 0.7),
+                    ),
+                ).result()
+        else:
+            result = asyncio.run(
+                manager.generate_video(
+                    prompt=payload.text,
+                    duration=cfg.get("duration", 4.0),
+                    fps=cfg.get("fps", 8),
+                    motion_strength=cfg.get("motion_strength", 0.7),
+                )
+            )
+
+        return ModalityPayload(
+            modality=Modality.VIDEO,
+            data=result.data,
+            mime_type=result.mime_type,
+            encoding="base64",
+            metadata={
+                "processor": "text_to_video",
+                "provider": result.provider_name,
+                "generation_time": result.generation_time,
+            },
+        )
+
+
+class TextTo3DProcessor(ModalityProcessor):
+    """Text-to-3D model generation via GenerationManager."""
+
+    def capability(self) -> ProcessorCapability:
+        return ProcessorCapability(
+            input_modality=Modality.TEXT,
+            output_modality=Modality.THREE_D,
+            name="text_to_3d",
+            description="Generate 3D models from text prompts",
+            max_input_bytes=10 * 1024,
+        )
+
+    def process(
+        self, payload: ModalityPayload, params: Optional[Dict[str, Any]] = None
+    ) -> ModalityPayload:
+        import asyncio
+        from versaai.generation.manager import GenerationManager
+
+        cfg = params or {}
+        manager = GenerationManager(cfg.get("generation_config", {}))
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                result = pool.submit(
+                    asyncio.run,
+                    manager.generate_3d(
+                        prompt=payload.text,
+                        format=cfg.get("format", "glb"),
+                        texture_resolution=cfg.get("texture_resolution", 1024),
+                    ),
+                ).result()
+        else:
+            result = asyncio.run(
+                manager.generate_3d(
+                    prompt=payload.text,
+                    format=cfg.get("format", "glb"),
+                    texture_resolution=cfg.get("texture_resolution", 1024),
+                )
+            )
+
+        return ModalityPayload(
+            modality=Modality.THREE_D,
+            data=result.data,
+            mime_type=result.mime_type,
+            encoding="base64",
+            metadata={
+                "processor": "text_to_3d",
+                "provider": result.provider_name,
+                "generation_time": result.generation_time,
+            },
+        )
+
+
 # ============================================================================
 # Processor Registry
 # ============================================================================
@@ -387,6 +574,9 @@ class MultimodalPipeline:
         """Register all built-in processors."""
         self._registry.register(TextToTextProcessor())
         self._registry.register(CodeToTextProcessor())
+        self._registry.register(TextToImageProcessor())
+        self._registry.register(TextToVideoProcessor())
+        self._registry.register(TextTo3DProcessor())
 
     @property
     def registry(self) -> ProcessorRegistry:

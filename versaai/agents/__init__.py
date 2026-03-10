@@ -19,6 +19,10 @@ from versaai.agents.planning import PlanningSystem, ExecutionPlan, Task
 from versaai.agents.planning_agent import PlanningAgent
 from versaai.agents.orchestrator import OrchestratorAgent
 from versaai.agents.llm_client import LLMClient
+from versaai.agents.image_gen_agent import ImageGenAgent
+from versaai.agents.video_gen_agent import VideoGenAgent
+from versaai.agents.model_gen_agent import ModelGenAgent
+from versaai.agents.companion_agent import CompanionAgent
 
 __all__ = [
     "AgentBase",
@@ -35,4 +39,8 @@ __all__ = [
     "PlanningAgent",
     "OrchestratorAgent",
     "LLMClient",
+    "ImageGenAgent",
+    "VideoGenAgent",
+    "ModelGenAgent",
+    "CompanionAgent",
 ]

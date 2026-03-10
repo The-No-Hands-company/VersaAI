@@ -33,7 +33,8 @@ router = APIRouter(prefix="/v1/agents")
 class AgentExecuteRequest(BaseModel):
     """Request to execute a task on an agent."""
     agent: str = Field(
-        description="Agent name: 'coding', 'research', 'reasoning', 'planning', 'orchestrator'"
+        description="Agent name: 'coding', 'research', 'reasoning', 'planning', "
+                    "'orchestrator', 'image_gen', 'video_gen', 'model_gen', 'companion'"
     )
     task: str = Field(
         description="The task to execute (natural language)"
@@ -160,9 +161,30 @@ def _get_or_create_agent(agent_name: str, config: Optional[Dict[str, Any]] = Non
         agent = OrchestratorAgent()
         agent.initialize(cfg)
 
+    elif key == "image_gen":
+        from versaai.agents.image_gen_agent import ImageGenAgent
+        agent = ImageGenAgent()
+        agent.initialize(cfg)
+
+    elif key == "video_gen":
+        from versaai.agents.video_gen_agent import VideoGenAgent
+        agent = VideoGenAgent()
+        agent.initialize(cfg)
+
+    elif key == "model_gen":
+        from versaai.agents.model_gen_agent import ModelGenAgent
+        agent = ModelGenAgent()
+        agent.initialize(cfg)
+
+    elif key == "companion":
+        from versaai.agents.companion_agent import CompanionAgent
+        agent = CompanionAgent()
+        agent.initialize(cfg)
+
     else:
         raise InvalidRequestError(
-            f"Unknown agent: '{agent_name}'. Available: coding, research, reasoning, planning, orchestrator",
+            f"Unknown agent: '{agent_name}'. Available: coding, research, reasoning, "
+            f"planning, orchestrator, image_gen, video_gen, model_gen, companion",
             param="agent",
         )
 
@@ -204,6 +226,30 @@ AGENT_INFO = [
         description="Meta-agent that decomposes goals and coordinates specialist agents",
         version="1.0.0",
         capabilities=["goal_decomposition", "agent_coordination", "parallel_execution", "result_synthesis"],
+    ),
+    AgentInfo(
+        name="image_gen",
+        description="AI image generation with prompt optimization (Stable Diffusion, ComfyUI, DALL-E)",
+        version="1.0.0",
+        capabilities=["text_to_image", "image_to_image", "prompt_optimization", "style_control"],
+    ),
+    AgentInfo(
+        name="video_gen",
+        description="AI video generation with scene analysis (AnimateDiff, SVD)",
+        version="1.0.0",
+        capabilities=["text_to_video", "image_to_video", "scene_analysis", "motion_control"],
+    ),
+    AgentInfo(
+        name="model_gen",
+        description="AI 3D model generation (TripoSR, Meshy)",
+        version="1.0.0",
+        capabilities=["text_to_3d", "image_to_3d", "mesh_generation", "texture_generation"],
+    ),
+    AgentInfo(
+        name="companion",
+        description="Virtual AI companion with personality, emotional intelligence, and memory",
+        version="1.0.0",
+        capabilities=["conversational_ai", "emotional_intelligence", "personality_customization", "user_memory"],
     ),
 ]
 
@@ -455,6 +501,43 @@ async def _dispatch_agent(
             metadata=raw.get("metadata", {}),
             execution_time=raw.get("execution_time", time.time() - start),
             status="success",
+        )
+
+    elif agent_name in ("image_gen", "video_gen", "model_gen"):
+        raw = await asyncio.to_thread(agent.execute, request.task, ctx)
+        metadata = raw.get("metadata", {})
+        # Include generation-specific fields in metadata
+        for key in ("image_data", "video_data", "model_data", "mime_type",
+                     "optimized_prompt", "negative_prompt", "seed_used",
+                     "motion_description", "art_style"):
+            if key in raw:
+                metadata[key] = raw[key]
+        return AgentExecuteResponse(
+            id=request_id,
+            agent=agent_name,
+            task=request.task,
+            result=raw.get("result", ""),
+            steps=raw.get("steps", []),
+            metadata=metadata,
+            execution_time=time.time() - start,
+            status=raw.get("status", "success"),
+        )
+
+    elif agent_name == "companion":
+        raw = await asyncio.to_thread(agent.execute, request.task, ctx)
+        metadata = raw.get("metadata", {})
+        metadata["mood"] = raw.get("mood", {})
+        metadata["facts_learned"] = raw.get("facts_learned", {})
+        metadata["topics"] = raw.get("topics", [])
+        return AgentExecuteResponse(
+            id=request_id,
+            agent=agent_name,
+            task=request.task,
+            result=raw.get("result", ""),
+            steps=raw.get("steps", []),
+            metadata=metadata,
+            execution_time=time.time() - start,
+            status=raw.get("status", "success"),
         )
 
     else:

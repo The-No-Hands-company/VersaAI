@@ -52,6 +52,28 @@ _AGENT_PATTERNS: List[Tuple[str, List[str]]] = [
         r"\b(?:reason|analyz|compar|decid|evaluat|pros?\s+and\s+cons"
         r"|trade-?off|logic|why|deduc|infer|assess)\b",
     ]),
+    ("image_gen", [
+        r"\b(?:generat(?:e|ing)\s+(?:an?\s+)?image|draw|paint|illustrat"
+        r"|creat(?:e|ing)\s+(?:an?\s+)?(?:image|picture|photo|artwork)"
+        r"|image\s+generat|text[\s-]to[\s-]image|stable\s*diffusion"
+        r"|dall[\s-]?e|midjourney|render\s+(?:an?\s+)?image)\b",
+    ]),
+    ("video_gen", [
+        r"\b(?:generat(?:e|ing)\s+(?:an?\s+)?video|creat(?:e|ing)\s+(?:an?\s+)?video"
+        r"|animat(?:e|ion)|text[\s-]to[\s-]video|video\s+generat"
+        r"|stable\s*video|motion\s+generat)\b",
+    ]),
+    ("model_gen", [
+        r"\b(?:generat(?:e|ing)\s+(?:an?\s+)?(?:3d|three[\s-]?d)\s*model"
+        r"|creat(?:e|ing)\s+(?:an?\s+)?(?:3d|three[\s-]?d)"
+        r"|text[\s-]to[\s-]3d|3d\s+generat|mesh\s+generat"
+        r"|(?:3d|three[\s-]?d)\s+(?:object|model|asset|scene))\b",
+    ]),
+    ("companion", [
+        r"\b(?:chat|talk|convers|companion|friend|buddy|hang\s*out"
+        r"|how\s+are\s+you|tell\s+me\s+about\s+yourself"
+        r"|let'?s?\s+talk|just\s+talk|casual|bored|lonely)\b",
+    ]),
 ]
 
 _COMPILED_PATTERNS = [
@@ -64,7 +86,8 @@ def classify_subtask(task_description: str) -> str:
     """
     Classify a subtask description to the best-fit agent.
 
-    Returns one of: "coding", "research", "reasoning".
+    Returns one of: "coding", "research", "reasoning", "image_gen",
+    "video_gen", "model_gen", "companion".
     Defaults to "reasoning" for ambiguous tasks.
     """
     scores: Dict[str, int] = {}

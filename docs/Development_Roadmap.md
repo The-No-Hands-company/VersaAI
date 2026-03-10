@@ -588,8 +588,61 @@ across agents without manual intervention.
   - Cross-modal routing: image→text (caption), text→image (generation)
   - Extensible processor interface for future model integrations
   - MIME-type based automatic modality detection
+  - Extended in §8.2 with TextToImage, TextToVideo, TextTo3D processors
 
-### 8.2 Industry Vertical Customization (Future)
+### 8.2 Generative Media & Virtual Companion ✅ **COMPLETE**
+
+**Goal:** Production-grade image, video, and 3D model generation with a
+persistent virtual companion agent.
+
+**Status:** ✅ Complete — 80 tests passing
+
+**Components:**
+
+- [x] **Image Generation Pipeline**
+  - StableDiffusionProvider (AUTOMATIC1111 WebUI API, port 7860)
+  - ComfyUIImageProvider (workflow-based, port 8188)
+  - DallEProvider (OpenAI DALL·E API, cloud)
+  - Negative prompts, seed control, guidance scale, multi-image batches
+  - LLM-based prompt optimisation via ImageGenAgent
+
+- [x] **Video Generation Pipeline**
+  - StableVideoProvider (AnimateDiff txt2vid + SVD img2vid via ComfyUI)
+  - Motion strength, duration, FPS, and seed control
+  - Scene analysis and motion description via VideoGenAgent
+
+- [x] **3D Model Generation Pipeline**
+  - TripoSRProvider (local TripoSR server, port 8090 + Tripo3D cloud API)
+  - MeshyProvider (Meshy cloud API)
+  - GLB, OBJ, FBX, STL output formats; texture resolution and mesh quality
+  - Format-aware prompt optimisation via ModelGenAgent
+
+- [x] **Virtual Companion Agent**
+  - CompanionPersonality system (name, traits, communication style, backstory)
+  - MoodState tracking with sentiment analysis and rolling mood history
+  - ConversationMemory with fact extraction (name, location, occupation, age)
+  - Topic tracking and mood-aware context injection into LLM messages
+  - Configurable humor, empathy, and proactivity levels
+  - Profile integration via ProfileManager for persistence
+
+- [x] **Generation REST API**
+  - POST /v1/generate/image — text-to-image and image-to-image
+  - POST /v1/generate/video — text-to-video and image-to-video
+  - POST /v1/generate/3d — text-to-3D and image-to-3D
+  - GET  /v1/generate/providers — list providers and health status
+  - POST /v1/generate/providers/health — run provider health checks
+
+- [x] **Multimodal Pipeline Integration**
+  - TextToImageProcessor, TextToVideoProcessor, TextTo3DProcessor
+  - Registered in multimodal _register_builtins()
+  - Async-aware event-loop detection for sync/async contexts
+
+- [x] **Orchestrator & Config Integration**
+  - 4 new agent pattern groups in Orchestrator (image_gen, video_gen, model_gen, companion)
+  - GenerationConfig with per-provider settings in Settings
+  - Agent factory and dispatch handlers in agents API route
+
+### 8.3 Industry Vertical Customization (Future)
 
 **Goal:** Domain-specific AI modes with specialized knowledge
 
@@ -610,7 +663,7 @@ across agents without manual intervention.
   - Codebase-aware suggestions
   - CI/CD integration and deployment assistance
 
-### 8.3 Quantum-Inspired Optimization (Exploratory)
+### 8.4 Quantum-Inspired Optimization (Exploratory)
 
 **Goal:** Future-proof optimization algorithms
 
