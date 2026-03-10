@@ -12,6 +12,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -95,10 +96,11 @@ class ProfileFull(BaseModel):
 
 
 @router.post("", response_model=ProfileFull, status_code=201)
-def create_profile(req: CreateProfileRequest):
+async def create_profile(req: CreateProfileRequest):
     mgr = _get_manager()
     try:
-        profile = mgr.create(
+        profile = await asyncio.to_thread(
+            mgr.create,
             profile_id=req.profile_id,
             display_name=req.display_name,
             preferences=req.preferences or None,
@@ -109,24 +111,26 @@ def create_profile(req: CreateProfileRequest):
 
 
 @router.get("", response_model=List[ProfileSummary])
-def list_profiles(limit: int = 50, offset: int = 0):
+async def list_profiles(limit: int = 50, offset: int = 0):
     mgr = _get_manager()
-    return [ProfileSummary(**p) for p in mgr.list_profiles(limit, offset)]
+    profiles = await asyncio.to_thread(mgr.list_profiles, limit, offset)
+    return [ProfileSummary(**p) for p in profiles]
 
 
 @router.get("/{profile_id}", response_model=ProfileFull)
-def get_profile(profile_id: str):
+async def get_profile(profile_id: str):
     mgr = _get_manager()
-    profile = mgr.get(profile_id)
+    profile = await asyncio.to_thread(mgr.get, profile_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="Profile not found")
     return ProfileFull(**profile.to_dict())
 
 
 @router.put("/{profile_id}", response_model=ProfileFull)
-def update_profile(profile_id: str, req: UpdateProfileRequest):
+async def update_profile(profile_id: str, req: UpdateProfileRequest):
     mgr = _get_manager()
-    profile = mgr.update(
+    profile = await asyncio.to_thread(
+        mgr.update,
         profile_id,
         display_name=req.display_name,
         preferences=req.preferences,
@@ -139,28 +143,30 @@ def update_profile(profile_id: str, req: UpdateProfileRequest):
 
 
 @router.delete("/{profile_id}", status_code=204)
-def delete_profile(profile_id: str):
+async def delete_profile(profile_id: str):
     mgr = _get_manager()
-    if not mgr.delete(profile_id):
+    deleted = await asyncio.to_thread(mgr.delete, profile_id)
+    if not deleted:
         raise HTTPException(status_code=404, detail="Profile not found")
 
 
 @router.post("/{profile_id}/learn", status_code=204)
-def learn_fact(profile_id: str, req: LearnRequest):
+async def learn_fact(profile_id: str, req: LearnRequest):
     mgr = _get_manager()
-    profile = mgr.get(profile_id)
+    profile = await asyncio.to_thread(mgr.get, profile_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="Profile not found")
-    mgr.learn(profile_id, req.category, req.value)
+    await asyncio.to_thread(mgr.learn, profile_id, req.category, req.value)
 
 
 @router.post("/{profile_id}/interaction", status_code=204)
-def record_interaction(profile_id: str, req: RecordInteractionRequest):
+async def record_interaction(profile_id: str, req: RecordInteractionRequest):
     mgr = _get_manager()
-    profile = mgr.get(profile_id)
+    profile = await asyncio.to_thread(mgr.get, profile_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="Profile not found")
-    mgr.record_interaction(
+    await asyncio.to_thread(
+        mgr.record_interaction,
         profile_id,
         agent_used=req.agent_used,
         topics=req.topics,

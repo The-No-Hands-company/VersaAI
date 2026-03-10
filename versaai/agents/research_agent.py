@@ -169,32 +169,43 @@ class ResearchAgent(AgentBase):
 
         self.logger.info(f"Executing task: {task[:120]}...")
         ctx = context or {}
+        status_cb = ctx.get("status_callback")
         steps: List[str] = []
         sources: List[Dict[str, Any]] = []
 
         # Step 1: Decompose query via LLM
         steps.append("query_decomposition")
+        if status_cb:
+            status_cb("Decomposing query into sub-queries...")
         sub_queries = self._decompose_query(task)
         self.logger.debug(f"Decomposed into {len(sub_queries)} sub-queries")
 
         # Step 2: RAG retrieval
         if self.rag:
             steps.append("retrieval")
+            if status_cb:
+                status_cb(f"Retrieving documents for {len(sub_queries)} sub-queries...")
             retrieved_docs = self._retrieve_documents(sub_queries)
             sources.extend(retrieved_docs)
 
         # Step 3: Generation
         steps.append("generation")
+        if status_cb:
+            status_cb("Generating draft response...")
         draft = self._generate_response(task, ctx, sources)
         self.logger.debug("Generated draft response")
 
         # Step 4: LLM-powered critique
         steps.append("critique")
+        if status_cb:
+            status_cb("Critiquing response for accuracy...")
         critique = self._critique_response(task, draft, sources)
 
         # Step 5: Correction if needed
         if critique["needs_correction"]:
             steps.append("correction")
+            if status_cb:
+                status_cb("Correcting response based on critique...")
             final = self._correct_response(task, draft, critique, sources)
             confidence = min(critique.get("confidence", 0.7) + 0.1, 1.0)
         else:
